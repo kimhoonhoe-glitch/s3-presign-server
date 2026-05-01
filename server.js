@@ -39,7 +39,7 @@ const todayKst = () => {
 };
 
 const isSafeId = (value) => {
-  return typeof value === 'string' && /^[A-Za-z0-9_-]{3,80}$/.test(value);
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{3,120}$/.test(value);
 };
 
 app.get('/health', (req, res) => {
@@ -60,46 +60,46 @@ app.post('/api/v1/s3-presign', async (req, res) => {
 
     const incomingPrefix = req.body?.prefix;
 
-let hunterId =
-  req.body?.hunterId ||
-  req.body?.hunter_id ||
-  req.body?.metadata?.hunter_id ||
-  req.body?.metadata?.hunter?.hunter_id;
+    let hunterId =
+      req.body?.hunterId ||
+      req.body?.hunter_id ||
+      req.body?.metadata?.hunter_id ||
+      req.body?.metadata?.hunter?.hunter_id;
 
-let captureId =
-  req.body?.captureId ||
-  req.body?.capture_id;
+    let captureId =
+      req.body?.captureId ||
+      req.body?.capture_id;
 
-let prefix;
+    let prefix;
 
-if (incomingPrefix) {
-  const match = incomingPrefix.match(
-    /^v1\/raw\/([0-9]{4}-[0-9]{2}-[0-9]{2})\/([A-Za-z0-9_-]{3,80})\/([A-Za-z0-9_-]{3,120})\/$/
-  );
+    if (incomingPrefix) {
+      const match = incomingPrefix.match(
+        /^(?:real\/)?v1\/raw\/([0-9]{4}-[0-9]{2}-[0-9]{2})\/([A-Za-z0-9_-]{3,80})\/([A-Za-z0-9_-]{3,120})\/$/
+      );
 
-  if (!match) {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid S3 prefix format',
-    });
-  }
+      if (!match) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid S3 prefix format',
+        });
+      }
 
-  const dateFromPrefix = match[1];
-  hunterId = match[2];
-  captureId = match[3];
+      const dateFromPrefix = match[1];
+      hunterId = match[2];
+      captureId = match[3];
 
-  prefix = `v1/raw/${dateFromPrefix}/${hunterId}/${captureId}/`;
-} else {
-  if (!isSafeId(hunterId) || !isSafeId(captureId)) {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid hunterId or captureId',
-    });
-  }
+      prefix = `real/v1/raw/${dateFromPrefix}/${hunterId}/${captureId}/`;
+    } else {
+      if (!isSafeId(hunterId) || !isSafeId(captureId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid hunterId or captureId',
+        });
+      }
 
-  const date = todayKst();
-  prefix = `v1/raw/${date}/${hunterId}/${captureId}/`;
-}
+      const date = todayKst();
+      prefix = `real/v1/raw/${date}/${hunterId}/${captureId}/`;
+    }
 
     const allowedFiles = {
       video: {
