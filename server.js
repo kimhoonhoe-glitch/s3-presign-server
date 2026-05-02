@@ -2,7 +2,12 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  GetObjectCommand,
+} = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const app = express();
@@ -42,6 +47,111 @@ const isSafeId = (value) => {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{3,120}$/.test(value);
 };
 
+const streamToString = (stream) => {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => {
+      resolve(Buffer.concat(chunks).toString('utf-8'));
+    });
+  });
+};
+
+const readJsonFromS3 = async (key) => {
+  const result = await s3.send(
+    new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+    })
+  );
+
+  const body = await streamToString(result.Body);
+  return JSON.parse(body);
+};
+
+const listCaptureMetadataKeys = async () => {
+  const keys = [];
+  let continuationToken;
+
+  do {
+    const result = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: 'real/v1/raw/',
+        ContinuationToken: continuationToken,
+      })
+    );
+
+    const foundKeys = (result.Contents || [])
+      .map((item) => item.Key)
+      .filter((key) => key && key.endsWith('capture_metadata_v1.json'));
+
+    keys.push(...foundKeys);
+
+    continuationToken = result.NextContinuationToken;
+  } while (continuationToken);
+
+  return keys;
+};
+
+const extractCaptureDate = (metadata, key) => {
+  const raw =
+    metadata.capture_date ||
+    metadata.recording_date ||
+    metadata.created_date ||
+    metadata.created_at ||
+    metadata.recording_started_at ||
+    metadata.recordingStartTime ||
+    '';
+
+  if (typeof raw === 'string' && raw.length >= 10) {
+    return raw.slice(0, 10);
+  }
+
+  const match = key.match(/real\/v1\/raw\/(\d{4}-\d{2}-\d{2})\//);
+  return match ? match[1] : null;
+};
+
+const getDurationMinutes = (metadata) => {
+  const ms =
+    Number(metadata.video_actual_duration_ms) ||
+    Number(metadata.video_duration_ms) ||
+    Number(metadata.duration_ms) ||
+    Number(metadata.recording_duration_ms) ||
+    0;
+
+  return Math.max(0, ms / 1000 / 60);
+};
+
+const getQualityMultiplier = (metadata) => {
+  const score =
+    Number(metadata.quality_score) ||
+    Number(metadata.overall_quality_score) ||
+    Number(metadata.dataset_quality_score) ||
+    Number(metadata.quality?.score) ||
+    70;
+
+  if (score >= 90) return 1.3;
+  if (score >= 80) return 1.15;
+  if (score >= 60) return 1.0;
+  if (score >= 40) return 0.7;
+  return 0.4;
+};
+
+const calculateEstimatedEarning = (metadata) => {
+  const durationMinutes = getDurationMinutes(metadata);
+
+  // MVP 임시 단가: 1분당 $0.10
+  const baseRatePerMinute = 0.10;
+
+  const qualityMultiplier = getQualityMultiplier(metadata);
+  const earning = durationMinutes * baseRatePerMinute * qualityMultiplier;
+
+  return Number(earning.toFixed(2));
+};
+
 app.get('/health', (req, res) => {
   res.json({
     success: true,
@@ -49,6 +159,99 @@ app.get('/health', (req, res) => {
     bucket: BUCKET,
     region: REGION,
   });
+});
+
+app.get('/hunter/earnings', async (req, res) => {
+  try {
+    const hunterId = req.query.hunter_id || req.query.hunterId;
+
+    if (!isSafeId(hunterId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid hunter_id is required',
+      });
+    }
+
+    const today = todayKst();
+    const keys = await listCaptureMetadataKeys();
+
+    let todayEarnings = 0;
+    let total = 0;
+    let matchedUploads = 0;
+
+    const items = [];
+
+    for (const key of keys) {
+      try {
+        const metadata = await readJsonFromS3(key);
+
+        let metadataHunterId =
+         metadata.hunter_id ||
+         metadata.hunterId ||
+         metadata.hunter?.hunter_id ||
+         metadata.hunter?.hunterId;
+
+// JSON에 없으면 S3 경로에서 hunter_id 추출
+if (!metadataHunterId) {
+  const match = key.match(/real\/v1\/raw\/\d{4}-\d{2}-\d{2}\/(HTR-[^\/]+)\//);
+  if (match) {
+    metadataHunterId = match[1];
+  }
+}
+
+        if (metadataHunterId !== hunterId) {
+          continue;
+        }
+
+        const estimated = calculateEstimatedEarning(metadata);
+        const captureDate = extractCaptureDate(metadata, key);
+        const durationMinutes = getDurationMinutes(metadata);
+
+        matchedUploads += 1;
+        total += estimated;
+
+        if (captureDate === today) {
+          todayEarnings += estimated;
+        }
+
+        items.push({
+          s3_key: key,
+          capture_date: captureDate,
+          duration_minutes: Number(durationMinutes.toFixed(2)),
+          estimated_earning: estimated,
+          status: 'estimated_pending',
+        });
+      } catch (itemError) {
+        console.error('EARNINGS_ITEM_ERROR', {
+          key,
+          error: itemError.message,
+        });
+      }
+    }
+
+    todayEarnings = Number(todayEarnings.toFixed(2));
+    total = Number(total.toFixed(2));
+
+    return res.json({
+      success: true,
+      hunter_id: hunterId,
+      currency: 'USD',
+      today_earnings: todayEarnings,
+      pending: total,
+      available: 0,
+      total,
+      matched_uploads: matchedUploads,
+      status: 'estimated_only',
+      items,
+    });
+  } catch (error) {
+    console.error('EARNINGS_API_ERROR:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to calculate hunter earnings',
+    });
+  }
 });
 
 app.post('/api/v1/s3-presign', async (req, res) => {
