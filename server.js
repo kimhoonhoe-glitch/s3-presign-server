@@ -43,6 +43,13 @@ const todayKst = () => {
   return kst.toISOString().slice(0, 10);
 };
 
+const dateKstDaysAgo = (daysAgo) => {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  kst.setDate(kst.getDate() - daysAgo);
+  return kst.toISOString().slice(0, 10);
+};
+
 const isSafeId = (value) => {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{3,120}$/.test(value);
 };
@@ -96,6 +103,23 @@ const listCaptureMetadataKeys = async () => {
   return keys;
 };
 
+const extractHunterId = (metadata, key) => {
+  let metadataHunterId =
+    metadata.hunter_id ||
+    metadata.hunterId ||
+    metadata.hunter?.hunter_id ||
+    metadata.hunter?.hunterId;
+
+  if (!metadataHunterId) {
+    const match = key.match(/real\/v1\/raw\/\d{4}-\d{2}-\d{2}\/(HTR-[^\/]+)\//);
+    if (match) {
+      metadataHunterId = match[1];
+    }
+  }
+
+  return metadataHunterId;
+};
+
 const extractCaptureDate = (metadata, key) => {
   const raw =
     metadata.capture_date ||
@@ -143,7 +167,7 @@ const getQualityMultiplier = (metadata) => {
 const calculateEstimatedEarning = (metadata) => {
   const durationMinutes = getDurationMinutes(metadata);
 
-  // MVP 임시 단가: 1분당 $0.10
+  // MVP temporary rate: $0.10 per minute
   const baseRatePerMinute = 0.10;
 
   const qualityMultiplier = getQualityMultiplier(metadata);
@@ -184,20 +208,7 @@ app.get('/hunter/earnings', async (req, res) => {
     for (const key of keys) {
       try {
         const metadata = await readJsonFromS3(key);
-
-        let metadataHunterId =
-         metadata.hunter_id ||
-         metadata.hunterId ||
-         metadata.hunter?.hunter_id ||
-         metadata.hunter?.hunterId;
-
-// JSON에 없으면 S3 경로에서 hunter_id 추출
-if (!metadataHunterId) {
-  const match = key.match(/real\/v1\/raw\/\d{4}-\d{2}-\d{2}\/(HTR-[^\/]+)\//);
-  if (match) {
-    metadataHunterId = match[1];
-  }
-}
+        const metadataHunterId = extractHunterId(metadata, key);
 
         if (metadataHunterId !== hunterId) {
           continue;
@@ -250,6 +261,131 @@ if (!metadataHunterId) {
     return res.status(500).json({
       success: false,
       message: 'Failed to calculate hunter earnings',
+    });
+  }
+});
+
+app.get('/hunter/dashboard', async (req, res) => {
+  try {
+    const hunterId = req.query.hunter_id || req.query.hunterId;
+
+    if (!isSafeId(hunterId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid hunter_id is required',
+      });
+    }
+
+    const today = todayKst();
+    const keys = await listCaptureMetadataKeys();
+
+    let todayUploads = 0;
+    let totalUploads = 0;
+    let todayEarnings = 0;
+    let totalEarnings = 0;
+
+    const weeklyMap = {};
+    const earningsMap = {};
+
+    for (let i = 6; i >= 0; i--) {
+      const date = dateKstDaysAgo(i);
+      weeklyMap[date] = 0;
+      earningsMap[date] = 0;
+    }
+
+    for (const key of keys) {
+      try {
+        const metadata = await readJsonFromS3(key);
+        const metadataHunterId = extractHunterId(metadata, key);
+
+        if (metadataHunterId !== hunterId) {
+          continue;
+        }
+
+        const captureDate = extractCaptureDate(metadata, key);
+        const estimated = calculateEstimatedEarning(metadata);
+
+        totalUploads += 1;
+        totalEarnings += estimated;
+
+        if (captureDate === today) {
+          todayUploads += 1;
+          todayEarnings += estimated;
+        }
+
+        if (captureDate && Object.prototype.hasOwnProperty.call(weeklyMap, captureDate)) {
+          weeklyMap[captureDate] += 1;
+          earningsMap[captureDate] += estimated;
+        }
+      } catch (itemError) {
+        console.error('DASHBOARD_ITEM_ERROR', {
+          key,
+          error: itemError.message,
+        });
+      }
+    }
+
+    const weeklyUploads = Object.entries(weeklyMap).map(([date, count]) => ({
+      date,
+      count,
+    }));
+
+    const earningsTrend = Object.entries(earningsMap).map(([date, amount]) => ({
+      date,
+      amount: Number(amount.toFixed(2)),
+    }));
+
+    totalEarnings = Number(totalEarnings.toFixed(2));
+    todayEarnings = Number(todayEarnings.toFixed(2));
+
+    return res.json({
+      success: true,
+      hunter_id: hunterId,
+      currency: 'USD',
+
+      earnings: {
+        today: todayEarnings,
+        pending: totalEarnings,
+        available: 0,
+        total: totalEarnings,
+      },
+
+      todayActivity: {
+        uploaded: todayUploads,
+        approved: 0,
+        rejected: 0,
+      },
+
+      performance: {
+        approvalRate: 0,
+        qualityScore: 0,
+      },
+
+      rejectedReasons: {
+        tooShaky: 0,
+        tooDark: 0,
+        noTrafficScene: 0,
+      },
+
+      weeklyUploads,
+      earningsTrend,
+
+      raw: {
+        today_uploads: todayUploads,
+        total_uploads: totalUploads,
+        today_earnings: todayEarnings,
+        pending_uploads: totalUploads,
+        approved_uploads: 0,
+        rejected_uploads: 0,
+        status: 'estimated_pending_before_review',
+      },
+    });
+  } catch (error) {
+    console.error('DASHBOARD_API_ERROR:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to calculate hunter dashboard',
     });
   }
 });
