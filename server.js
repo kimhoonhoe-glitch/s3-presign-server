@@ -57,12 +57,9 @@ const isSafeId = (value) => {
 const streamToString = (stream) => {
   return new Promise((resolve, reject) => {
     const chunks = [];
-
     stream.on('data', (chunk) => chunks.push(chunk));
     stream.on('error', reject);
-    stream.on('end', () => {
-      resolve(Buffer.concat(chunks).toString('utf-8'));
-    });
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
   });
 };
 
@@ -96,7 +93,6 @@ const listCaptureMetadataKeys = async () => {
       .filter((key) => key && key.endsWith('capture_metadata_v1.json'));
 
     keys.push(...foundKeys);
-
     continuationToken = result.NextContinuationToken;
   } while (continuationToken);
 
@@ -112,9 +108,7 @@ const extractHunterId = (metadata, key) => {
 
   if (!metadataHunterId) {
     const match = key.match(/real\/v1\/raw\/\d{4}-\d{2}-\d{2}\/(HTR-[^\/]+)\//);
-    if (match) {
-      metadataHunterId = match[1];
-    }
+    if (match) metadataHunterId = match[1];
   }
 
   return metadataHunterId;
@@ -166,14 +160,18 @@ const getQualityMultiplier = (metadata) => {
 
 const calculateEstimatedEarning = (metadata) => {
   const durationMinutes = getDurationMinutes(metadata);
-
-  // MVP temporary rate: $0.10 per minute
   const baseRatePerMinute = 0.10;
-
   const qualityMultiplier = getQualityMultiplier(metadata);
   const earning = durationMinutes * baseRatePerMinute * qualityMultiplier;
 
   return Number(earning.toFixed(2));
+};
+
+const getTierByEarnings = (totalEarnings) => {
+  if (totalEarnings >= 50) return 'DIAMOND HUNTER';
+  if (totalEarnings >= 20) return 'GOLD HUNTER';
+  if (totalEarnings >= 5) return 'SILVER HUNTER';
+  return 'BRONZE HUNTER';
 };
 
 app.get('/health', (req, res) => {
@@ -210,9 +208,7 @@ app.get('/hunter/earnings', async (req, res) => {
         const metadata = await readJsonFromS3(key);
         const metadataHunterId = extractHunterId(metadata, key);
 
-        if (metadataHunterId !== hunterId) {
-          continue;
-        }
+        if (metadataHunterId !== hunterId) continue;
 
         const estimated = calculateEstimatedEarning(metadata);
         const captureDate = extractCaptureDate(metadata, key);
@@ -240,24 +236,20 @@ app.get('/hunter/earnings', async (req, res) => {
       }
     }
 
-    todayEarnings = Number(todayEarnings.toFixed(2));
-    total = Number(total.toFixed(2));
-
     return res.json({
       success: true,
       hunter_id: hunterId,
       currency: 'USD',
-      today_earnings: todayEarnings,
-      pending: total,
+      today_earnings: Number(todayEarnings.toFixed(2)),
+      pending: Number(total.toFixed(2)),
       available: 0,
-      total,
+      total: Number(total.toFixed(2)),
       matched_uploads: matchedUploads,
       status: 'estimated_only',
       items,
     });
   } catch (error) {
     console.error('EARNINGS_API_ERROR:', error);
-
     return res.status(500).json({
       success: false,
       message: 'Failed to calculate hunter earnings',
@@ -298,9 +290,7 @@ app.get('/hunter/dashboard', async (req, res) => {
         const metadata = await readJsonFromS3(key);
         const metadataHunterId = extractHunterId(metadata, key);
 
-        if (metadataHunterId !== hunterId) {
-          continue;
-        }
+        if (metadataHunterId !== hunterId) continue;
 
         const captureDate = extractCaptureDate(metadata, key);
         const estimated = calculateEstimatedEarning(metadata);
@@ -342,34 +332,28 @@ app.get('/hunter/dashboard', async (req, res) => {
       success: true,
       hunter_id: hunterId,
       currency: 'USD',
-
       earnings: {
         today: todayEarnings,
         pending: totalEarnings,
         available: 0,
         total: totalEarnings,
       },
-
       todayActivity: {
         uploaded: todayUploads,
         approved: 0,
         rejected: 0,
       },
-
       performance: {
         approvalRate: 0,
         qualityScore: 0,
       },
-
       rejectedReasons: {
         tooShaky: 0,
         tooDark: 0,
         noTrafficScene: 0,
       },
-
       weeklyUploads,
       earningsTrend,
-
       raw: {
         today_uploads: todayUploads,
         total_uploads: totalUploads,
@@ -382,10 +366,99 @@ app.get('/hunter/dashboard', async (req, res) => {
     });
   } catch (error) {
     console.error('DASHBOARD_API_ERROR:', error);
-
     return res.status(500).json({
       success: false,
       message: 'Failed to calculate hunter dashboard',
+    });
+  }
+});
+
+app.get('/hunter/rankings', async (req, res) => {
+  try {
+    const type = String(req.query.type || 'GLOBAL').toUpperCase();
+    const currentHunterId = req.query.hunter_id || req.query.hunterId || null;
+
+    const keys = await listCaptureMetadataKeys();
+    const hunterMap = {};
+
+    for (const key of keys) {
+      try {
+        const metadata = await readJsonFromS3(key);
+        const hunterId = extractHunterId(metadata, key);
+
+        if (!isSafeId(hunterId)) continue;
+
+        const estimated = calculateEstimatedEarning(metadata);
+        const durationMinutes = getDurationMinutes(metadata);
+
+        if (!hunterMap[hunterId]) {
+          hunterMap[hunterId] = {
+            hunter_id: hunterId,
+            total_uploads: 0,
+            total_earnings: 0,
+            total_minutes: 0,
+            approval_rate: 0,
+            quality_score: 0,
+          };
+        }
+
+        hunterMap[hunterId].total_uploads += 1;
+        hunterMap[hunterId].total_earnings += estimated;
+        hunterMap[hunterId].total_minutes += durationMinutes;
+      } catch (itemError) {
+        console.error('RANKINGS_ITEM_ERROR', {
+          key,
+          error: itemError.message,
+        });
+      }
+    }
+
+    const rankings = Object.values(hunterMap)
+      .map((item) => ({
+        ...item,
+        total_earnings: Number(item.total_earnings.toFixed(2)),
+        total_minutes: Number(item.total_minutes.toFixed(2)),
+        tier: getTierByEarnings(item.total_earnings),
+      }))
+      .sort((a, b) => {
+        if (b.total_earnings !== a.total_earnings) {
+          return b.total_earnings - a.total_earnings;
+        }
+        if (b.total_uploads !== a.total_uploads) {
+          return b.total_uploads - a.total_uploads;
+        }
+        return a.hunter_id.localeCompare(b.hunter_id);
+      })
+      .map((item, index) => ({
+        rank: index + 1,
+        id: item.hunter_id,
+        hunter_id: item.hunter_id,
+        tier: item.tier,
+        approvalRate: item.approval_rate,
+        rate: `${item.approval_rate}%`,
+        totalUploads: item.total_uploads,
+        totalEarnings: item.total_earnings,
+        totalMinutes: item.total_minutes,
+      }));
+
+    const myRank = currentHunterId
+      ? rankings.find((item) => item.hunter_id === currentHunterId) || null
+      : null;
+
+    return res.json({
+      success: true,
+      type,
+      currency: 'USD',
+      rankings,
+      myRank,
+      totalHunters: rankings.length,
+      status: 'estimated_pending_before_review',
+    });
+  } catch (error) {
+    console.error('RANKINGS_API_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to calculate hunter rankings',
     });
   }
 });
@@ -493,7 +566,6 @@ app.post('/api/v1/s3-presign', async (req, res) => {
     });
   } catch (error) {
     console.error('PRESIGN_ERROR:', error);
-
     return res.status(500).json({
       success: false,
       message: 'Failed to create presigned URLs',
