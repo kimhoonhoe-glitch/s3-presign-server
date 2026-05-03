@@ -429,17 +429,29 @@ app.get('/hunter/rankings', async (req, res) => {
         }
         return a.hunter_id.localeCompare(b.hunter_id);
       })
-      .map((item, index) => ({
-        rank: index + 1,
-        id: item.hunter_id,
-        hunter_id: item.hunter_id,
-        tier: item.tier,
-        approvalRate: item.approval_rate,
-        rate: `${item.approval_rate}%`,
-        totalUploads: item.total_uploads,
-        totalEarnings: item.total_earnings,
-        totalMinutes: item.total_minutes,
-      }));
+      .map((item, index) => {
+        const isCurrentHunter = currentHunterId && item.hunter_id === currentHunterId;
+
+        return {
+          rank: index + 1,
+          id: item.hunter_id,
+          hunter_id: item.hunter_id,
+
+          // 화면 표시용 이름
+          // 현재 로그인한 헌터는 You로 표시하고,
+          // 다른 헌터는 일단 hunter_id로 표시한다.
+          // 나중에 nickname 저장 구조가 생기면 여기에 nickname을 우선 적용하면 된다.
+          displayName: isCurrentHunter ? 'You' : item.hunter_id,
+          isCurrentHunter: Boolean(isCurrentHunter),
+
+          tier: item.tier,
+          approvalRate: item.approval_rate,
+          rate: `${item.approval_rate}%`,
+          totalUploads: item.total_uploads,
+          totalEarnings: item.total_earnings,
+          totalMinutes: item.total_minutes,
+        };
+      });
 
     const myRank = currentHunterId
       ? rankings.find((item) => item.hunter_id === currentHunterId) || null
