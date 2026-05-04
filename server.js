@@ -582,6 +582,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/api/v1/app-version-policy', (req, res) => {
+  res.json({
+    success: true,
+    platform: 'android',
+    minimum_supported_version: '1.0.2',
+    latest_version: '1.0.2',
+    force_update: true,
+    update_url: 'https://expo.dev/accounts/origindatalab/projects/new-hunter-app/builds/여기에_새_APK_주소',
+    message: 'A new version is required. Please update the Hunter App before recording or uploading.'
+  });
+});
+
 app.get('/admin/incomplete-uploads', async (req, res) => {
   try {
     const hunterFilter = req.query.hunter_id || req.query.hunterId || null;
