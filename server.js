@@ -8,6 +8,10 @@ const {
   ListObjectsV2Command,
   GetObjectCommand,
   HeadObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
@@ -46,6 +50,7 @@ const REQUIRED_UPLOAD_FILES = {
 
 const UPLOAD_COMPLETE_FILE = 'upload_complete.json';
 const MIN_DURATION_MS = 180000;
+const MULTIPART_EXPIRES_IN_SECONDS = 900;
 
 const todayKst = () => {
   const now = new Date();
@@ -79,6 +84,49 @@ const normalizePrefix = (prefix) => {
     captureId: match[3],
     prefix: `real/v1/raw/${match[1]}/${match[2]}/${match[3]}/`,
   };
+};
+
+const normalizeMultipartVideoKey = (body = {}) => {
+  const incomingPrefix = body.s3Prefix || body.prefix || null;
+  const incomingKey = body.key || null;
+
+  if (incomingPrefix) {
+    const parsed = normalizePrefix(incomingPrefix);
+    if (!parsed) return null;
+
+    return {
+      ...parsed,
+      key: `${parsed.prefix}${REQUIRED_UPLOAD_FILES.video}`,
+    };
+  }
+
+  if (typeof incomingKey === 'string') {
+    const match = incomingKey.match(
+      /^real\/v1\/raw\/([0-9]{4}-[0-9]{2}-[0-9]{2})\/([A-Za-z0-9_-]{3,120})\/([A-Za-z0-9_-]{3,120})\/video_raw\.mp4$/
+    );
+
+    if (!match) return null;
+
+    return {
+      date: match[1],
+      hunterId: match[2],
+      captureId: match[3],
+      prefix: `real/v1/raw/${match[1]}/${match[2]}/${match[3]}/`,
+      key: incomingKey,
+    };
+  }
+
+  return null;
+};
+
+const normalizeEtagForComplete = (etag) => {
+  if (typeof etag !== 'string') return '';
+
+  const cleaned = etag.trim().replace(/^"+|"+$/g, '');
+
+  if (!cleaned) return '';
+
+  return `"${cleaned}"`;
 };
 
 const streamToString = (stream) => {
@@ -213,11 +261,6 @@ const getUploadFileStatus = async (prefix) => {
     serverMarkedComplete: uploadComplete.exists && uploadComplete.size > 0,
     strictComplete: missing.length === 0 && uploadComplete.exists && uploadComplete.size > 0,
   };
-};
-
-const hasUploadComplete = async (prefix) => {
-  const status = await getUploadFileStatus(prefix);
-  return status.strictComplete === true;
 };
 
 const extractHunterId = (metadata, key) => {
@@ -501,6 +544,10 @@ const createServerUploadCompleteMarker = async ({ prefix, hunterId, captureId, u
     payable: review.payable,
     reject_reasons: review.reasons,
     review_warnings: review.warnings,
+
+    upload_transport_complete: true,
+    dataset_segmentation_requested: true,
+    dataset_segment_mode: 'server_only_after_raw_complete',
   };
 
   await s3.send(
@@ -524,6 +571,14 @@ app.get('/health', (req, res) => {
     upload_complete_mode: 'server_verified_only',
     required_files: REQUIRED_UPLOAD_FILES,
     minimum_duration_minutes: 3,
+    multipart_upload_enabled: true,
+    multipart_endpoints: [
+      '/api/v1/s3-multipart/create',
+      '/api/v1/s3-multipart/part-url',
+      '/api/v1/s3-multipart/complete',
+      '/api/v1/s3-multipart/abort',
+    ],
+    dataset_segment_mode: 'server_only_after_raw_complete',
   });
 });
 
@@ -1099,6 +1154,8 @@ app.post('/api/v1/s3-presign', async (req, res) => {
       hunterId,
       captureId,
       uploadCompleteMode: 'server_verified_only',
+      multipartUploadEnabled: true,
+      datasetSegmentMode: 'server_only_after_raw_complete',
     });
 
     return res.json({
@@ -1108,6 +1165,14 @@ app.post('/api/v1/s3-presign', async (req, res) => {
       requiredFiles: REQUIRED_UPLOAD_FILES,
       uploadCompleteMode: 'server_verified_only',
       finalizeEndpoint: '/api/v1/upload-complete',
+      multipartUploadEnabled: true,
+      multipartEndpoints: {
+        create: '/api/v1/s3-multipart/create',
+        partUrl: '/api/v1/s3-multipart/part-url',
+        complete: '/api/v1/s3-multipart/complete',
+        abort: '/api/v1/s3-multipart/abort',
+      },
+      datasetSegmentMode: 'server_only_after_raw_complete',
       urls,
     });
   } catch (error) {
@@ -1115,6 +1180,293 @@ app.post('/api/v1/s3-presign', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to create presigned URLs',
+    });
+  }
+});
+
+app.post('/api/v1/s3-multipart/create', async (req, res) => {
+  try {
+    const parsed = normalizeMultipartVideoKey(req.body);
+
+    if (!parsed) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_MULTIPART_KEY',
+        message: 'Multipart upload is allowed only for real/v1/raw/.../video_raw.mp4',
+      });
+    }
+
+    const contentType = req.body?.contentType || 'video/mp4';
+
+    if (contentType !== 'video/mp4') {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_CONTENT_TYPE',
+        message: 'Only video/mp4 is allowed for multipart video upload',
+      });
+    }
+
+    const command = new CreateMultipartUploadCommand({
+      Bucket: BUCKET,
+      Key: parsed.key,
+      ContentType: 'video/mp4',
+      Metadata: {
+        upload_transport_mode: 's3_multipart',
+        dataset_segment_mode: 'server_only_after_raw_complete',
+        hunter_id: parsed.hunterId,
+        capture_id: parsed.captureId,
+      },
+    });
+
+    const result = await s3.send(command);
+
+    console.log('S3_MULTIPART_CREATE_DONE', {
+      key: parsed.key,
+      uploadId: result.UploadId,
+      hunterId: parsed.hunterId,
+      captureId: parsed.captureId,
+      datasetSegmentMode: 'server_only_after_raw_complete',
+    });
+
+    return res.json({
+      success: true,
+      bucket: BUCKET,
+      key: parsed.key,
+      s3Prefix: parsed.prefix,
+      uploadId: result.UploadId,
+      contentType: 'video/mp4',
+      uploadTransportMode: 's3_multipart',
+      datasetSegmentMode: 'server_only_after_raw_complete',
+      message: 'Multipart upload created for raw video only',
+    });
+  } catch (error) {
+    console.error('S3_MULTIPART_CREATE_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create multipart upload',
+    });
+  }
+});
+
+app.post('/api/v1/s3-multipart/part-url', async (req, res) => {
+  try {
+    const parsed = normalizeMultipartVideoKey(req.body);
+    const uploadId = req.body?.uploadId;
+    const partNumber = Number(req.body?.partNumber);
+
+    if (!parsed) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_MULTIPART_KEY',
+        message: 'Multipart part URL is allowed only for real/v1/raw/.../video_raw.mp4',
+      });
+    }
+
+    if (!uploadId || typeof uploadId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_UPLOAD_ID',
+        message: 'Valid uploadId is required',
+      });
+    }
+
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_PART_NUMBER',
+        message: 'partNumber must be an integer between 1 and 10000',
+      });
+    }
+
+    const command = new UploadPartCommand({
+      Bucket: BUCKET,
+      Key: parsed.key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+    });
+
+    const url = await getSignedUrl(s3, command, {
+      expiresIn: MULTIPART_EXPIRES_IN_SECONDS,
+    });
+
+    console.log('S3_MULTIPART_PART_URL_CREATED', {
+      key: parsed.key,
+      uploadId,
+      partNumber,
+    });
+
+    return res.json({
+      success: true,
+      bucket: BUCKET,
+      key: parsed.key,
+      uploadId,
+      partNumber,
+      expiresIn: MULTIPART_EXPIRES_IN_SECONDS,
+      url,
+    });
+  } catch (error) {
+    console.error('S3_MULTIPART_PART_URL_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create multipart part URL',
+    });
+  }
+});
+
+app.post('/api/v1/s3-multipart/complete', async (req, res) => {
+  try {
+    const parsed = normalizeMultipartVideoKey(req.body);
+    const uploadId = req.body?.uploadId;
+    const incomingParts = Array.isArray(req.body?.parts) ? req.body.parts : [];
+
+    if (!parsed) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_MULTIPART_KEY',
+        message: 'Multipart complete is allowed only for real/v1/raw/.../video_raw.mp4',
+      });
+    }
+
+    if (!uploadId || typeof uploadId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_UPLOAD_ID',
+        message: 'Valid uploadId is required',
+      });
+    }
+
+    if (incomingParts.length < 1 || incomingParts.length > 10000) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_PARTS',
+        message: 'parts must contain between 1 and 10000 uploaded parts',
+      });
+    }
+
+    const parts = incomingParts
+      .map((part) => {
+        const partNumber = Number(part.PartNumber || part.partNumber);
+        const eTag = normalizeEtagForComplete(part.ETag || part.eTag || part.etag);
+
+        return {
+          PartNumber: partNumber,
+          ETag: eTag,
+        };
+      })
+      .filter((part) => {
+        return Number.isInteger(part.PartNumber) &&
+          part.PartNumber >= 1 &&
+          part.PartNumber <= 10000 &&
+          Boolean(part.ETag);
+      })
+      .sort((a, b) => a.PartNumber - b.PartNumber);
+
+    if (parts.length !== incomingParts.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_PARTS',
+        message: 'Every part must include valid PartNumber and ETag',
+      });
+    }
+
+    const uniquePartNumbers = new Set(parts.map((part) => part.PartNumber));
+    if (uniquePartNumbers.size !== parts.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'DUPLICATE_PART_NUMBER',
+        message: 'Duplicate PartNumber found',
+      });
+    }
+
+    const command = new CompleteMultipartUploadCommand({
+      Bucket: BUCKET,
+      Key: parsed.key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: parts,
+      },
+    });
+
+    const result = await s3.send(command);
+
+    console.log('S3_MULTIPART_COMPLETE_DONE', {
+      key: parsed.key,
+      uploadId,
+      partCount: parts.length,
+      location: result.Location,
+      datasetSegmentMode: 'server_only_after_raw_complete',
+    });
+
+    return res.json({
+      success: true,
+      bucket: BUCKET,
+      key: parsed.key,
+      s3Prefix: parsed.prefix,
+      uploadId,
+      partCount: parts.length,
+      eTag: result.ETag || null,
+      location: result.Location || null,
+      uploadTransportComplete: true,
+      datasetSegmentationComplete: false,
+      datasetSegmentMode: 'server_only_after_raw_complete',
+      message: 'Raw video multipart upload completed. Dataset segmentation must run on server after upload-complete verification.',
+    });
+  } catch (error) {
+    console.error('S3_MULTIPART_COMPLETE_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to complete multipart upload',
+    });
+  }
+});
+
+app.post('/api/v1/s3-multipart/abort', async (req, res) => {
+  try {
+    const parsed = normalizeMultipartVideoKey(req.body);
+    const uploadId = req.body?.uploadId;
+
+    if (!parsed) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_MULTIPART_KEY',
+        message: 'Multipart abort is allowed only for real/v1/raw/.../video_raw.mp4',
+      });
+    }
+
+    if (!uploadId || typeof uploadId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_UPLOAD_ID',
+        message: 'Valid uploadId is required',
+      });
+    }
+
+    const command = new AbortMultipartUploadCommand({
+      Bucket: BUCKET,
+      Key: parsed.key,
+      UploadId: uploadId,
+    });
+
+    await s3.send(command);
+
+    console.log('S3_MULTIPART_ABORT_DONE', {
+      key: parsed.key,
+      uploadId,
+    });
+
+    return res.json({
+      success: true,
+      bucket: BUCKET,
+      key: parsed.key,
+      s3Prefix: parsed.prefix,
+      uploadId,
+      message: 'Multipart upload aborted',
+    });
+  } catch (error) {
+    console.error('S3_MULTIPART_ABORT_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to abort multipart upload',
     });
   }
 });
@@ -1197,6 +1549,9 @@ app.post('/api/v1/upload-complete', async (req, res) => {
       payable: review.payable,
       reject_reasons: review.reasons,
       review_warnings: review.warnings,
+      uploadTransportComplete: true,
+      datasetSegmentationRequested: true,
+      datasetSegmentMode: 'server_only_after_raw_complete',
       marker,
     });
   } catch (error) {
@@ -1206,6 +1561,28 @@ app.post('/api/v1/upload-complete', async (req, res) => {
       message: 'Failed to verify upload completion',
     });
   }
+});
+
+app.get('/api/v1/today-mission', (req, res) => {
+  const hunterId = req.query.hunter_id || 'UNKNOWN';
+
+  // 일단 고정 → 나중에 자동화
+  const mission = {
+    id: "mission_traffic_basic",
+    title: "Street Traffic Capture",
+    description: "Record moving traffic for at least 3 minutes.",
+    minimum_minutes: 3,
+    recommended_minutes: 10,
+    target_scene: "road_traffic",
+    camera_mode: "forward",
+    reward_hint: "Higher quality = higher earning",
+  };
+
+  return res.json({
+    success: true,
+    hunter_id: hunterId,
+    mission,
+  });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
