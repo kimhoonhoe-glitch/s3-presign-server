@@ -586,11 +586,11 @@ app.get('/api/v1/app-version-policy', (req, res) => {
   res.json({
     success: true,
     platform: 'android',
-    minimum_supported_version: '1.0.2',
+    minimum_supported_version: '1.0.0',
     latest_version: '1.0.2',
-    force_update: true,
-    update_url: 'https://expo.dev/accounts/origindatalab/projects/new-hunter-app/builds/여기에_새_APK_주소',
-    message: 'A new version is required. Please update the Hunter App before recording or uploading.'
+    force_update: false,
+    update_url: 'https://expo.dev/accounts/origindatalab/projects/new-hunter-app/builds/2666081f-48cd-4dca-b11d-780ba3f4fd34',
+    message: 'A new version is available. Please update the Hunter App.'
   });
 });
 
