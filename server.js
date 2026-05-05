@@ -20,7 +20,7 @@ const app = express();
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'HEAD', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+ allowedHeaders: ['Content-Type', 'Authorization', 'x-app-version'],
 }));
 
 app.use(express.json({ limit: '2mb' }));
@@ -51,6 +51,47 @@ const REQUIRED_UPLOAD_FILES = {
 const UPLOAD_COMPLETE_FILE = 'upload_complete.json';
 const MIN_DURATION_MS = 180000;
 const MULTIPART_EXPIRES_IN_SECONDS = 900;
+
+const MIN_SUPPORTED_APP_VERSION = '1.0.3';
+
+const compareAppVersion = (a, b) => {
+  const pa = String(a || '').split('.').map(Number);
+  const pb = String(b || '').split('.').map(Number);
+
+  for (let i = 0; i < 3; i += 1) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+
+  return 0;
+};
+
+const requireSupportedAppVersion = (req, res, next) => {
+  const appVersion =
+    req.headers['x-app-version'] ||
+    req.body?.app_version ||
+    req.body?.appVersion ||
+    req.body?.client_app_version ||
+    req.body?.clientAppVersion;
+
+  if (!appVersion || compareAppVersion(appVersion, MIN_SUPPORTED_APP_VERSION) < 0) {
+    return res.status(426).json({
+      success: false,
+      error: 'APP_UPDATE_REQUIRED',
+      code: 'APP_UPDATE_REQUIRED',
+      message: 'Please update the Hunter App to continue uploading.',
+      minimum_supported_version: MIN_SUPPORTED_APP_VERSION,
+      current_version: appVersion || null,
+      update_url:
+        'https://expo.dev/accounts/origindatalab/projects/new-hunter-app/builds/9f0a480d-7227-4226-b752-73c3515758c0',
+    });
+  }
+
+  return next();
+};
 
 const todayKst = () => {
   const now = new Date();
@@ -934,7 +975,7 @@ app.get('/hunter/rankings', async (req, res) => {
   }
 });
 
-app.post('/api/v1/s3-multipart/create', async (req, res) => {
+app.post('/api/v1/s3-multipart/create', requireSupportedAppVersion, async (req, res) => {
   try {
     const parsed = normalizeMultipartVideoKey(req.body);
 
@@ -998,7 +1039,7 @@ app.post('/api/v1/s3-multipart/create', async (req, res) => {
   }
 });
 
-app.post('/api/v1/s3-multipart/part-url', async (req, res) => {
+app.post('/api/v1/s3-multipart/part-url', requireSupportedAppVersion, async (req, res) => {
   try {
     const parsed = normalizeMultipartVideoKey(req.body);
     const uploadId = req.body?.uploadId;
@@ -1063,7 +1104,7 @@ app.post('/api/v1/s3-multipart/part-url', async (req, res) => {
   }
 });
 
-app.post('/api/v1/s3-multipart/complete', async (req, res) => {
+app.post('/api/v1/s3-multipart/complete', requireSupportedAppVersion, async (req, res) => {
   try {
     const parsed = normalizeMultipartVideoKey(req.body);
     const uploadId = req.body?.uploadId;
@@ -1221,7 +1262,7 @@ app.post('/api/v1/s3-multipart/abort', async (req, res) => {
   }
 });
 
-app.post('/api/v1/upload-complete', async (req, res) => {
+app.post('/api/v1/upload-complete', requireSupportedAppVersion, async (req, res) => {
   try {
     const incomingPrefix = req.body?.s3Prefix || req.body?.prefix;
     const parsed = normalizePrefix(incomingPrefix);
