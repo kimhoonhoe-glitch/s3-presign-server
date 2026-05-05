@@ -603,6 +603,83 @@ const createServerUploadCompleteMarker = async ({ prefix, hunterId, captureId, u
   return marker;
 };
 
+app.get('/admin/review', async (req, res) => {
+  res.send(`
+  <html>
+  <head>
+    <title>Admin Review</title>
+    <style>
+      body { font-family: Arial; background:#111; color:#eee; }
+      table { border-collapse: collapse; width: 100%; }
+      td, th { border:1px solid #444; padding:8px; font-size:12px; }
+      th { background:#222; }
+      button { padding:5px 10px; cursor:pointer; }
+      video { width:600px; margin-top:10px; }
+    </style>
+  </head>
+  <body>
+    <h2>📊 Hunter Review Dashboard</h2>
+
+    <table id="table">
+      <thead>
+        <tr>
+          <th>Hunter</th>
+          <th>Phone</th>
+          <th>Country</th>
+          <th>Date</th>
+          <th>Duration</th>
+          <th>Status</th>
+          <th>Reasons</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="player"></div>
+
+    <script>
+      async function load() {
+        const res = await fetch('/admin/review-uploads?limit=50');
+        const data = await res.json();
+
+        const tbody = document.querySelector('tbody');
+
+        data.items.forEach(item => {
+          const tr = document.createElement('tr');
+
+          tr.innerHTML = \`
+            <td>\${item.hunter.nickname} (\${item.hunter_id})</td>
+            <td>\${item.hunter.phone}</td>
+            <td>\${item.hunter.country}</td>
+            <td>\${item.capture_date}</td>
+            <td>\${item.duration_minutes}</td>
+            <td>\${item.status}</td>
+            <td>\${item.reject_reasons.join(', ')}</td>
+            <td><button onclick="play('\${item.video_key}')">보기</button></td>
+          \`;
+
+          tbody.appendChild(tr);
+        });
+      }
+
+      async function play(key) {
+        const res = await fetch('/admin/video-url?key=' + encodeURIComponent(key));
+        const data = await res.json();
+
+        document.getElementById('player').innerHTML = \`
+          <video controls src="\${data.url}"></video>
+        \`;
+      }
+
+      load();
+    </script>
+
+  </body>
+  </html>
+  `);
+});
+
 app.get('/health', (req, res) => {
   res.json({
     success: true,
