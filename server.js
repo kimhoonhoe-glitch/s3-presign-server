@@ -799,6 +799,43 @@ app.get('/admin/review-uploads', async (req, res) => {
   }
 });
 
+app.get('/admin/video-url', async (req, res) => {
+  try {
+    const key = req.query.key;
+
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'key is required',
+      });
+    }
+
+    // S3 GetObject presigned URL 생성
+    const command = new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+    });
+
+    const url = await getSignedUrl(s3, command, {
+      expiresIn: 300, // 5분
+    });
+
+    return res.json({
+      success: true,
+      key,
+      url,
+      expires_in_seconds: 300,
+    });
+
+  } catch (error) {
+    console.error('VIDEO_URL_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate video URL',
+    });
+  }
+});
+
 app.get('/admin/incomplete-uploads', async (req, res) => {
   try {
     const hunterFilter = req.query.hunter_id || req.query.hunterId || null;
