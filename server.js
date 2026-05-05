@@ -620,6 +620,13 @@ app.get('/admin/review', async (req, res) => {
   <body>
     <h2>📊 Hunter Review Dashboard</h2>
 
+<div style="margin-bottom:10px;">
+  <button onclick="load('')">전체</button>
+  <button onclick="load('GOOD_PENDING_REVIEW')">통과</button>
+  <button onclick="load('REJECT')">리젝</button>
+  <button onclick="load('HOLD')">보류</button>
+</div>
+
     <table id="table">
       <thead>
         <tr>
@@ -636,41 +643,62 @@ app.get('/admin/review', async (req, res) => {
       <tbody></tbody>
     </table>
 
+<div id="videoPopup" style="position:fixed; bottom:20px; right:20px; background:#000; padding:10px; display:none;">
+  <button onclick="closeVideo()">닫기</button><br/>
+  <video id="previewVideo" controls muted style="width:300px;"></video>
+</div>
+
     <div id="player"></div>
 
     <script>
-      async function load() {
-        const res = await fetch('/admin/review-uploads?limit=50');
-        const data = await res.json();
+     async function load(status = '') {
+  const url = status
+    ? '/admin/review-uploads?limit=50&status=' + encodeURIComponent(status)
+    : '/admin/review-uploads?limit=50';
 
-        const tbody = document.querySelector('tbody');
+  const res = await fetch(url);
+  const data = await res.json();
 
-        data.items.forEach(item => {
-          const tr = document.createElement('tr');
+  const tbody = document.querySelector('tbody');
+  tbody.innerHTML = ''; // 🔥 이거 반드시 있어야 함
 
-          tr.innerHTML = \`
-            <td>\${item.hunter.nickname} (\${item.hunter_id})</td>
-            <td>\${item.hunter.phone}</td>
-            <td>\${item.hunter.country}</td>
-            <td>\${item.capture_date}</td>
-            <td>\${item.duration_minutes}</td>
-            <td>\${item.status}</td>
-            <td>\${item.reject_reasons.join(', ')}</td>
-            <td><button onclick="play('\${item.video_key}')">보기</button></td>
-          \`;
+  data.items.forEach(item => {
+    const tr = document.createElement('tr');
 
-          tbody.appendChild(tr);
-        });
-      }
+    tr.innerHTML = `
+      <td>${item.hunter.nickname} (${item.hunter_id})</td>
+      <td>${item.hunter.phone}</td>
+      <td>${item.hunter.country}</td>
+      <td>${item.capture_date}</td>
+      <td>${item.duration_minutes}</td>
+      <td>${item.status}</td>
+      <td>${item.reject_reasons.join(', ')}</td>
+      <td><button onclick="play('${item.video_key}')">보기</button></td>
+    `;
 
-      async function play(key) {
-        const res = await fetch('/admin/video-url?key=' + encodeURIComponent(key));
-        const data = await res.json();
+    tbody.appendChild(tr);
+  });
+}
 
-        document.getElementById('player').innerHTML = \`
-          <video controls src="\${data.url}"></video>
-        \`;
-      }
+     async function play(key) {
+  const res = await fetch('/admin/video-url?key=' + encodeURIComponent(key));
+  const data = await res.json();
+
+  const popup = document.getElementById('videoPopup');
+  const video = document.getElementById('previewVideo');
+
+  video.src = data.url;
+  popup.style.display = 'block';
+}
+
+function closeVideo() {
+  const popup = document.getElementById('videoPopup');
+  const video = document.getElementById('previewVideo');
+
+  video.pause();
+  video.src = '';
+  popup.style.display = 'none';
+}
 
       load();
     </script>
