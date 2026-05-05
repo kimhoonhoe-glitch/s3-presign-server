@@ -586,11 +586,11 @@ app.get('/api/v1/app-version-policy', (req, res) => {
   res.json({
     success: true,
     platform: 'android',
-    minimum_supported_version: '1.0.0',
-    latest_version: '1.0.2',
-    force_update: false,
-    update_url: 'https://expo.dev/accounts/origindatalab/projects/new-hunter-app/builds/2666081f-48cd-4dca-b11d-780ba3f4fd34',
-    message: 'A new version is available. Please update the Hunter App.'
+    minimum_supported_version: '1.0.3',
+    latest_version: '1.0.3',
+    force_update: true,
+    update_url: 'https://expo.dev/accounts/origindatalab/projects/new-hunter-app/builds/9f0a480d-7227-4226-b752-73c3515758c0',
+    message: 'A required update is available. Please update the Hunter App.'
   });
 });
 
@@ -716,84 +716,60 @@ app.get('/hunter/earnings', async (req, res) => {
 
         const captureDate = extractCaptureDate(metadata, key);
         const durationMinutes = getDurationMinutes(metadata);
+
         const review = getAutoReview(metadata, {
           uploadComplete,
           uploadMissing: uploadStatus.missing,
         });
+
         const estimated = calculatePayableEarning(metadata, review);
 
         matchedUploads += 1;
 
-        if (review.status === 'REJECT') rejectedUploads += 1;
-        if (review.status === 'HOLD') holdUploads += 1;
-        if (review.payable) payableUploads += 1;
+        if (review.status === 'REJECT') {
+          rejectedUploads += 1;
+        } else if (review.status === 'HOLD') {
+          holdUploads += 1;
+        } else if (review.payable) {
+          payableUploads += 1;
+          total += estimated;
 
-        total += estimated;
-
-        if (captureDate === today) {
-          todayEarnings += estimated;
+          if (captureDate === today) {
+            todayEarnings += estimated;
+          }
         }
 
         items.push({
           s3_key: key,
-          s3_prefix: prefix,
           capture_date: captureDate,
           duration_minutes: Number(durationMinutes.toFixed(2)),
           estimated_earning: estimated,
-          raw_estimated_earning_before_review: calculateEstimatedEarning(metadata),
           status: review.status,
           payable: review.payable,
-          review_required: review.review_required,
-          quality_bucket: review.quality_bucket,
           reject_reasons: review.reasons,
-          review_warnings: review.warnings,
-          upload_required_complete: uploadStatus.requiredComplete,
-          upload_server_marked_complete: uploadStatus.serverMarkedComplete,
-          upload_strict_complete: uploadStatus.strictComplete,
-          upload_missing_files: uploadStatus.missing,
         });
-      } catch (itemError) {
-        console.error('EARNINGS_ITEM_ERROR', {
-          key,
-          error: itemError.message,
-        });
+
+      } catch (err) {
+        console.error('EARNINGS_ITEM_ERROR', err);
       }
     }
 
     return res.json({
       success: true,
       hunter_id: hunterId,
-      currency: 'USD',
       today_earnings: Number(todayEarnings.toFixed(2)),
-      pending: Number(total.toFixed(2)),
-      available: 0,
       total: Number(total.toFixed(2)),
-      matched_uploads: matchedUploads,
       payable_uploads: payableUploads,
-      hold_uploads: holdUploads,
       rejected_uploads: rejectedUploads,
+      hold_uploads: holdUploads,
+      matched_uploads: matchedUploads,
       skipped_incomplete_uploads: skippedIncompleteUploads,
-      status: 'auto_review_applied_server_verified_uploads_only',
-      auto_review_rules: {
-        minimum_duration_minutes: 3,
-        reject_short_video: true,
-        reject_incomplete_upload: true,
-        reject_missing_video: true,
-        reject_missing_capture_metadata: true,
-        reject_missing_imu_metadata: true,
-        reject_stationary_or_no_movement: true,
-        reject_high_duplicate_risk: true,
-        reject_dark_low_sale_probability: true,
-        reject_gps_reject_recommended: true,
-      },
       items,
     });
+
   } catch (error) {
-    console.error('EARNINGS_API_ERROR:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to calculate hunter earnings',
-    });
+    console.error(error);
+    res.status(500).json({ success: false });
   }
 });
 
@@ -815,164 +791,91 @@ app.get('/hunter/dashboard', async (req, res) => {
     let totalUploads = 0;
     let todayEarnings = 0;
     let totalEarnings = 0;
-    let approvedCandidateUploads = 0;
+    let approvedUploads = 0;
     let holdUploads = 0;
     let rejectedUploads = 0;
-    let skippedIncompleteUploads = 0;
-
-    const rejectedReasons = {};
-    const weeklyMap = {};
-    const earningsMap = {};
-
-    for (let i = 6; i >= 0; i--) {
-      const date = dateKstDaysAgo(i);
-      weeklyMap[date] = 0;
-      earningsMap[date] = 0;
-    }
 
     for (const key of keys) {
       try {
-        const prefix = getCapturePrefixFromMetadataKey(key);
-        const uploadStatus = await getUploadFileStatus(prefix);
-        const uploadComplete = uploadStatus.strictComplete;
-
-        if (!uploadComplete) {
-          skippedIncompleteUploads += 1;
-        }
-
         const metadata = await readJsonFromS3(key);
         const metadataHunterId = extractHunterId(metadata, key);
 
         if (metadataHunterId !== hunterId) continue;
 
         const captureDate = extractCaptureDate(metadata, key);
+
         const review = getAutoReview(metadata, {
-          uploadComplete,
-          uploadMissing: uploadStatus.missing,
+          uploadComplete: true,
+          uploadMissing: [],
         });
+
         const estimated = calculatePayableEarning(metadata, review);
 
         totalUploads += 1;
-        totalEarnings += estimated;
 
         if (review.status === 'REJECT') {
           rejectedUploads += 1;
-          for (const reason of review.reasons) {
-            rejectedReasons[reason] = (rejectedReasons[reason] || 0) + 1;
-          }
         } else if (review.status === 'HOLD') {
           holdUploads += 1;
-        } else {
-          approvedCandidateUploads += 1;
+        } else if (review.payable) {
+          approvedUploads += 1;
+          totalEarnings += estimated;
         }
 
         if (captureDate === today) {
           todayUploads += 1;
-          todayEarnings += estimated;
+
+          if (review.payable) {
+            todayEarnings += estimated;
+          }
         }
 
-        if (captureDate && Object.prototype.hasOwnProperty.call(weeklyMap, captureDate)) {
-          weeklyMap[captureDate] += 1;
-          earningsMap[captureDate] += estimated;
-        }
-      } catch (itemError) {
-        console.error('DASHBOARD_ITEM_ERROR', {
-          key,
-          error: itemError.message,
-        });
+      } catch (err) {
+        console.error('DASHBOARD_ITEM_ERROR', err);
       }
     }
-
-    const weeklyUploads = Object.entries(weeklyMap).map(([date, count]) => ({
-      date,
-      count,
-    }));
-
-    const earningsTrend = Object.entries(earningsMap).map(([date, amount]) => ({
-      date,
-      amount: Number(amount.toFixed(2)),
-    }));
-
-    totalEarnings = Number(totalEarnings.toFixed(2));
-    todayEarnings = Number(todayEarnings.toFixed(2));
-
-    const approvalRate =
-      totalUploads > 0
-        ? Number(((approvedCandidateUploads / totalUploads) * 100).toFixed(1))
-        : 0;
 
     return res.json({
       success: true,
       hunter_id: hunterId,
       currency: 'USD',
       earnings: {
-        today: todayEarnings,
-        pending: totalEarnings,
-        available: 0,
-        total: totalEarnings,
+        today: Number(todayEarnings.toFixed(2)),
+        total: Number(totalEarnings.toFixed(2)),
       },
-      todayActivity: {
-        uploaded: todayUploads,
-        approved: approvedCandidateUploads,
+      stats: {
+        uploaded: totalUploads,
+        approved: approvedUploads,
         hold: holdUploads,
         rejected: rejectedUploads,
       },
-      performance: {
-        approvalRate,
-        qualityScore: approvalRate,
-      },
-      rejectedReasons,
-      weeklyUploads,
-      earningsTrend,
-      raw: {
-        today_uploads: todayUploads,
-        total_uploads: totalUploads,
-        today_earnings: todayEarnings,
-        pending_uploads: approvedCandidateUploads,
-        approved_uploads: approvedCandidateUploads,
-        hold_uploads: holdUploads,
-        rejected_uploads: rejectedUploads,
-        skipped_incomplete_uploads: skippedIncompleteUploads,
-        status: 'auto_review_applied_server_verified_uploads_only',
-      },
     });
+
   } catch (error) {
-    console.error('DASHBOARD_API_ERROR:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to calculate hunter dashboard',
-    });
+    console.error(error);
+    res.status(500).json({ success: false });
   }
 });
 
 app.get('/hunter/rankings', async (req, res) => {
   try {
-    const type = String(req.query.type || 'GLOBAL').toUpperCase();
     const currentHunterId = req.query.hunter_id || req.query.hunterId || null;
 
     const keys = await listCaptureMetadataKeys();
     const hunterMap = {};
-    let skippedIncompleteUploads = 0;
 
     for (const key of keys) {
       try {
-        const prefix = getCapturePrefixFromMetadataKey(key);
-        const uploadStatus = await getUploadFileStatus(prefix);
-        const uploadComplete = uploadStatus.strictComplete;
-
-        if (!uploadComplete) {
-          skippedIncompleteUploads += 1;
-        }
-
         const metadata = await readJsonFromS3(key);
         const hunterId = extractHunterId(metadata, key);
 
         if (!isSafeId(hunterId)) continue;
 
         const review = getAutoReview(metadata, {
-          uploadComplete,
-          uploadMissing: uploadStatus.missing,
+          uploadComplete: true,
+          uploadMissing: [],
         });
+
         const estimated = calculatePayableEarning(metadata, review);
         const durationMinutes = getDurationMinutes(metadata);
 
@@ -985,214 +888,49 @@ app.get('/hunter/rankings', async (req, res) => {
             rejected_uploads: 0,
             total_earnings: 0,
             total_minutes: 0,
-            approval_rate: 0,
-            quality_score: 0,
           };
         }
 
         hunterMap[hunterId].total_uploads += 1;
-        hunterMap[hunterId].total_earnings += estimated;
-        hunterMap[hunterId].total_minutes += durationMinutes;
 
         if (review.status === 'REJECT') {
           hunterMap[hunterId].rejected_uploads += 1;
         } else if (review.status === 'HOLD') {
           hunterMap[hunterId].hold_uploads += 1;
-        } else {
+        } else if (review.payable) {
           hunterMap[hunterId].payable_uploads += 1;
+          hunterMap[hunterId].total_earnings += estimated;
+          hunterMap[hunterId].total_minutes += durationMinutes;
         }
-      } catch (itemError) {
-        console.error('RANKINGS_ITEM_ERROR', {
-          key,
-          error: itemError.message,
-        });
+
+      } catch (err) {
+        console.error('RANKINGS_ITEM_ERROR', err);
       }
     }
 
     const rankings = Object.values(hunterMap)
-      .map((item) => {
-        const approvalRate =
-          item.total_uploads > 0
-            ? Number(((item.payable_uploads / item.total_uploads) * 100).toFixed(1))
-            : 0;
-
-        return {
-          ...item,
-          total_earnings: Number(item.total_earnings.toFixed(2)),
-          total_minutes: Number(item.total_minutes.toFixed(2)),
-          approval_rate: approvalRate,
-          quality_score: approvalRate,
-          tier: getTierByEarnings(item.total_earnings),
-        };
-      })
-      .sort((a, b) => {
-        if (b.total_earnings !== a.total_earnings) {
-          return b.total_earnings - a.total_earnings;
-        }
-        if (b.payable_uploads !== a.payable_uploads) {
-          return b.payable_uploads - a.payable_uploads;
-        }
-        if (b.total_uploads !== a.total_uploads) {
-          return b.total_uploads - a.total_uploads;
-        }
-        return a.hunter_id.localeCompare(b.hunter_id);
-      })
-      .map((item, index) => {
-        const isCurrentHunter = currentHunterId && item.hunter_id === currentHunterId;
-
-        return {
-          rank: index + 1,
-          id: item.hunter_id,
-          hunter_id: item.hunter_id,
-          displayName: isCurrentHunter ? 'You' : item.hunter_id,
-          isCurrentHunter: Boolean(isCurrentHunter),
-          tier: item.tier,
-          approvalRate: item.approval_rate,
-          rate: `${item.approval_rate}%`,
-          totalUploads: item.total_uploads,
-          payableUploads: item.payable_uploads,
-          holdUploads: item.hold_uploads,
-          rejectedUploads: item.rejected_uploads,
-          totalEarnings: item.total_earnings,
-          totalMinutes: item.total_minutes,
-        };
-      });
-
-    const myRank = currentHunterId
-      ? rankings.find((item) => item.hunter_id === currentHunterId) || null
-      : null;
+      .sort((a, b) => b.total_earnings - a.total_earnings)
+      .map((item, index) => ({
+        rank: index + 1,
+        hunter_id: item.hunter_id,
+        total_uploads: item.total_uploads,
+        payable_uploads: item.payable_uploads,
+        hold_uploads: item.hold_uploads,
+        rejected_uploads: item.rejected_uploads,
+        total_earnings: Number(item.total_earnings.toFixed(2)),
+        total_minutes: Number(item.total_minutes.toFixed(2)),
+        isCurrentHunter: currentHunterId === item.hunter_id,
+      }));
 
     return res.json({
       success: true,
-      type,
-      currency: 'USD',
       rankings,
-      myRank,
       totalHunters: rankings.length,
-      skipped_incomplete_uploads: skippedIncompleteUploads,
-      status: 'auto_review_applied_server_verified_uploads_only',
     });
+
   } catch (error) {
-    console.error('RANKINGS_API_ERROR:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to calculate hunter rankings',
-    });
-  }
-});
-
-app.post('/api/v1/s3-presign', async (req, res) => {
-  try {
-    console.log('PRESIGN_REQUEST_RECEIVED', {
-      time: new Date().toISOString(),
-      body: req.body,
-    });
-
-    const incomingPrefix = req.body?.prefix;
-
-    let hunterId =
-      req.body?.hunterId ||
-      req.body?.hunter_id ||
-      req.body?.metadata?.hunter_id ||
-      req.body?.metadata?.hunter?.hunter_id;
-
-    let captureId =
-      req.body?.captureId ||
-      req.body?.capture_id;
-
-    let prefix;
-
-    if (incomingPrefix) {
-      const parsed = normalizePrefix(incomingPrefix);
-
-      if (!parsed) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid S3 prefix format',
-        });
-      }
-
-      hunterId = parsed.hunterId;
-      captureId = parsed.captureId;
-      prefix = parsed.prefix;
-    } else {
-      if (!isSafeId(hunterId) || !isSafeId(captureId)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid hunterId or captureId',
-        });
-      }
-
-      const date = todayKst();
-      prefix = buildCapturePrefix({ date, hunterId, captureId });
-    }
-
-    const allowedFiles = {
-      video: {
-        fileName: REQUIRED_UPLOAD_FILES.video,
-        contentType: 'video/mp4',
-      },
-      captureMetadata: {
-        fileName: REQUIRED_UPLOAD_FILES.captureMetadata,
-        contentType: 'application/json',
-      },
-      imuMetadata: {
-        fileName: REQUIRED_UPLOAD_FILES.imuMetadata,
-        contentType: 'application/json',
-      },
-    };
-
-    const makeUrl = async ({ fileName, contentType }) => {
-      const command = new PutObjectCommand({
-        Bucket: BUCKET,
-        Key: `${prefix}${fileName}`,
-        ContentType: contentType,
-      });
-
-      return await getSignedUrl(s3, command, {
-        expiresIn: 300,
-      });
-    };
-
-    const urls = {
-      video: await makeUrl(allowedFiles.video),
-      captureMetadata: await makeUrl(allowedFiles.captureMetadata),
-      imuMetadata: await makeUrl(allowedFiles.imuMetadata),
-    };
-
-    console.log('PRESIGN_URLS_CREATED', {
-      time: new Date().toISOString(),
-      prefix,
-      hunterId,
-      captureId,
-      uploadCompleteMode: 'server_verified_only',
-      multipartUploadEnabled: true,
-      datasetSegmentMode: 'server_only_after_raw_complete',
-    });
-
-    return res.json({
-      success: true,
-      bucket: BUCKET,
-      s3Prefix: prefix,
-      requiredFiles: REQUIRED_UPLOAD_FILES,
-      uploadCompleteMode: 'server_verified_only',
-      finalizeEndpoint: '/api/v1/upload-complete',
-      multipartUploadEnabled: true,
-      multipartEndpoints: {
-        create: '/api/v1/s3-multipart/create',
-        partUrl: '/api/v1/s3-multipart/part-url',
-        complete: '/api/v1/s3-multipart/complete',
-        abort: '/api/v1/s3-multipart/abort',
-      },
-      datasetSegmentMode: 'server_only_after_raw_complete',
-      urls,
-    });
-  } catch (error) {
-    console.error('PRESIGN_ERROR:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to create presigned URLs',
-    });
+    console.error(error);
+    res.status(500).json({ success: false });
   }
 });
 
