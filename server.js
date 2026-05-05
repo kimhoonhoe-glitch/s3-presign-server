@@ -665,16 +665,16 @@ app.get('/admin/review', async (req, res) => {
   data.items.forEach(item => {
     const tr = document.createElement('tr');
 
-    tr.innerHTML = `
-      <td>${item.hunter.nickname} (${item.hunter_id})</td>
-      <td>${item.hunter.phone}</td>
-      <td>${item.hunter.country}</td>
-      <td>${item.capture_date}</td>
-      <td>${item.duration_minutes}</td>
-      <td>${item.status}</td>
-      <td>${item.reject_reasons.join(', ')}</td>
-      <td><button onclick="play('${item.video_key}')">보기</button></td>
-    `;
+   tr.innerHTML = \`
+  <td>\${item.hunter.nickname} (\${item.hunter_id})</td>
+  <td>\${item.hunter.phone}</td>
+  <td>\${item.hunter.country}</td>
+  <td>\${item.capture_date}</td>
+  <td>\${item.duration_minutes}</td>
+  <td>\${item.status}</td>
+  <td>\${item.reject_reasons.join(', ')}</td>
+  <td><button onclick="play('\${item.video_key}')">보기</button></td>
+\`;
 
     tbody.appendChild(tr);
   });
