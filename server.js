@@ -635,6 +635,170 @@ app.get('/api/v1/app-version-policy', (req, res) => {
   });
 });
 
+app.get('/admin/review-uploads', async (req, res) => {
+  try {
+    const hunterFilter = req.query.hunter_id || req.query.hunterId || null;
+    const statusFilter = req.query.status || null;
+    const limit = Math.min(Number(req.query.limit || 200), 1000);
+
+    const keys = await listCaptureMetadataKeys();
+    const items = [];
+
+    for (const key of keys) {
+      try {
+        const prefix = getCapturePrefixFromMetadataKey(key);
+        const uploadStatus = await getUploadFileStatus(prefix);
+        const uploadComplete = uploadStatus.strictComplete;
+
+        const metadata = await readJsonFromS3(key);
+        const hunterId = extractHunterId(metadata, key);
+
+        if (!isSafeId(hunterId)) continue;
+        if (hunterFilter && hunterId !== hunterFilter) continue;
+
+        const hunterProfile = {
+          hunter_id: hunterId,
+
+          nickname:
+            metadata.hunter?.nickname ||
+            metadata.hunter_profile?.nickname ||
+            metadata.nickname ||
+            metadata.public_hunter_code ||
+            metadata.hunter?.public_hunter_code ||
+            metadata.hunter_profile?.public_hunter_code ||
+            '미등록',
+
+          phone:
+            metadata.hunter?.phone ||
+            metadata.hunter?.phone_number ||
+            metadata.hunter?.phoneNumber ||
+            metadata.hunter_profile?.phone ||
+            metadata.hunter_profile?.phone_number ||
+            metadata.hunter_profile?.phoneNumber ||
+            metadata.phone ||
+            metadata.phone_number ||
+            metadata.phoneNumber ||
+            '미수집',
+
+          country:
+            metadata.hunter?.country ||
+            metadata.hunter_profile?.country ||
+            metadata.location?.country ||
+            metadata.country ||
+            '미수집',
+
+          city:
+            metadata.hunter?.city ||
+            metadata.hunter_profile?.city ||
+            metadata.location?.city ||
+            metadata.city ||
+            '미수집',
+
+          city_code:
+            metadata.hunter?.city_code ||
+            metadata.hunter?.cityCode ||
+            metadata.hunter_profile?.city_code ||
+            metadata.hunter_profile?.cityCode ||
+            metadata.location?.city_code ||
+            metadata.location?.cityCode ||
+            metadata.city_code ||
+            metadata.cityCode ||
+            '미수집',
+
+          public_hunter_code:
+            metadata.hunter?.public_hunter_code ||
+            metadata.hunter?.publicHunterCode ||
+            metadata.hunter_profile?.public_hunter_code ||
+            metadata.hunter_profile?.publicHunterCode ||
+            metadata.public_hunter_code ||
+            metadata.publicHunterCode ||
+            '미수집',
+
+          recruited_by_hunter_id:
+            metadata.hunter?.recruited_by_hunter_id ||
+            metadata.hunter?.recruitedByHunterId ||
+            metadata.hunter_profile?.recruited_by_hunter_id ||
+            metadata.hunter_profile?.recruitedByHunterId ||
+            metadata.recruited_by_hunter_id ||
+            metadata.recruitedByHunterId ||
+            null,
+
+          leader_hunter_id:
+            metadata.hunter?.leader_hunter_id ||
+            metadata.hunter?.leaderHunterId ||
+            metadata.hunter_profile?.leader_hunter_id ||
+            metadata.hunter_profile?.leaderHunterId ||
+            metadata.leader_hunter_id ||
+            metadata.leaderHunterId ||
+            null,
+        };
+
+        const captureDate = extractCaptureDate(metadata, key);
+        const durationMinutes = getDurationMinutes(metadata);
+
+        const review = getAutoReview(metadata, {
+          uploadComplete,
+          uploadMissing: uploadStatus.missing,
+        });
+
+        const estimatedEarning = calculatePayableEarning(metadata, review);
+
+        const item = {
+          s3_key: key,
+          s3_prefix: prefix,
+
+          hunter_id: hunterId,
+          hunter: hunterProfile,
+
+          capture_date: captureDate,
+          duration_minutes: Number(durationMinutes.toFixed(2)),
+
+          upload_complete: uploadComplete,
+          missing_files: uploadStatus.missing,
+
+          status: review.status,
+          payable: review.payable,
+          reject_reasons: review.reasons,
+          review_warnings: review.warnings,
+          quality_bucket: review.quality_bucket,
+
+          estimated_earning_usd: estimatedEarning,
+
+          video_key: uploadStatus.keys.video,
+          capture_metadata_key: uploadStatus.keys.captureMetadata,
+          imu_metadata_key: uploadStatus.keys.imuMetadata,
+        };
+
+        if (statusFilter && item.status !== statusFilter) continue;
+
+        items.push(item);
+      } catch (err) {
+        console.error('ADMIN_REVIEW_UPLOAD_ITEM_ERROR', err);
+      }
+    }
+
+    items.sort((a, b) => {
+      const dateCompare = String(b.capture_date || '').localeCompare(String(a.capture_date || ''));
+      if (dateCompare !== 0) return dateCompare;
+      return String(b.s3_key || '').localeCompare(String(a.s3_key || ''));
+    });
+
+    return res.json({
+      success: true,
+      total: items.length,
+      hunter_filter: hunterFilter,
+      status_filter: statusFilter,
+      items: items.slice(0, limit),
+    });
+  } catch (error) {
+    console.error('ADMIN_REVIEW_UPLOADS_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load review uploads',
+    });
+  }
+});
+
 app.get('/admin/incomplete-uploads', async (req, res) => {
   try {
     const hunterFilter = req.query.hunter_id || req.query.hunterId || null;
