@@ -2533,10 +2533,8 @@ const imuMetadataKey = `${safePrefix}${files.imuMetadata}`;
     );
 
     console.log('S3_PRESIGN_CREATED', {
-      hunterId,
-      captureId,
-      prefix,
-    });
+    prefix,
+   });
 
     return res.json({
       success: true,
