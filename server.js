@@ -2557,7 +2557,7 @@ const imuMetadataKey = `${safePrefix}${files.imuMetadata}`;
   }
 });
 
-app.post('/api/v1/s3-multipart/create', requireSupportedAppVersion, async (req, res) => {
+app.post('/api/v1/s3-multipart/create', async (req, res) => {
   try {
     const parsed = normalizeMultipartVideoKey(req.body);
 
@@ -2620,8 +2620,7 @@ app.post('/api/v1/s3-multipart/create', requireSupportedAppVersion, async (req, 
     });
   }
 });
-
-app.post('/api/v1/s3-multipart/part-url', requireSupportedAppVersion, async (req, res) => {
+app.post('/api/v1/s3-multipart/part-url', async (req, res) => {
   try {
     const parsed = normalizeMultipartVideoKey(req.body);
     const uploadId = req.body?.uploadId;
@@ -2686,7 +2685,7 @@ app.post('/api/v1/s3-multipart/part-url', requireSupportedAppVersion, async (req
   }
 });
 
-app.post('/api/v1/s3-multipart/complete', requireSupportedAppVersion, async (req, res) => {
+app.post('/api/v1/s3-multipart/complete', async (req, res) => {
   try {
     const parsed = normalizeMultipartVideoKey(req.body);
     const uploadId = req.body?.uploadId;
@@ -2844,7 +2843,7 @@ app.post('/api/v1/s3-multipart/abort', async (req, res) => {
   }
 });
 
-app.post('/api/v1/upload-complete', requireSupportedAppVersion, async (req, res) => {
+app.post('/api/v1/upload-complete', async (req, res) => {
   try {
     const incomingPrefix = req.body?.s3Prefix || req.body?.prefix;
     const parsed = normalizePrefix(incomingPrefix);
