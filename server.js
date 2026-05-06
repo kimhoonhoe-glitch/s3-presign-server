@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const {
@@ -28,6 +30,38 @@ app.use(express.json({ limit: '2mb' }));
 const PORT = process.env.PORT || 5050;
 const REGION = process.env.AWS_REGION;
 const BUCKET = process.env.S3_BUCKET;
+
+const PAYOUT_REQUESTS_FILE = path.join(__dirname, 'payout_requests.json');
+
+const readPayoutRequests = () => {
+  try {
+    if (!fs.existsSync(PAYOUT_REQUESTS_FILE)) {
+      fs.writeFileSync(PAYOUT_REQUESTS_FILE, '[]', 'utf8');
+    }
+
+    const raw = fs.readFileSync(PAYOUT_REQUESTS_FILE, 'utf8');
+    if (!raw.trim()) return [];
+
+    return JSON.parse(raw);
+  } catch (error) {
+    console.error('READ_PAYOUT_REQUESTS_ERROR:', error);
+    return [];
+  }
+};
+
+const writePayoutRequests = (items) => {
+  try {
+    fs.writeFileSync(
+      PAYOUT_REQUESTS_FILE,
+      JSON.stringify(items, null, 2),
+      'utf8'
+    );
+    return true;
+  } catch (error) {
+    console.error('WRITE_PAYOUT_REQUESTS_ERROR:', error);
+    return false;
+  }
+};
 
 if (!REGION || !BUCKET || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
   console.error('Missing required AWS environment variables');
@@ -602,109 +636,542 @@ const createServerUploadCompleteMarker = async ({ prefix, hunterId, captureId, u
 
   return marker;
 };
-
-app.get('/admin/review', async (req, res) => {
+app.get('/admin/payouts', (req, res) => {
   res.send(`
-  <html>
-  <head>
-    <title>Admin Review</title>
-    <style>
-      body { font-family: Arial; background:#111; color:#eee; }
-      table { border-collapse: collapse; width: 100%; }
-      td, th { border:1px solid #444; padding:8px; font-size:12px; }
-      th { background:#222; }
-      button { padding:5px 10px; cursor:pointer; }
-      video { width:600px; margin-top:10px; }
-    </style>
-  </head>
-  <body>
-    <h2>📊 Hunter Review Dashboard</h2>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Payout Dashboard</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: Arial, sans-serif;
+      background: #f5f6f8;
+      color: #111827;
+      font-size: 13px;
+    }
 
-<div style="margin-bottom:10px;">
-  <button onclick="load('')">전체</button>
-  <button onclick="load('GOOD_PENDING_REVIEW')">통과</button>
-  <button onclick="load('REJECT')">리젝</button>
-  <button onclick="load('HOLD')">보류</button>
-</div>
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
 
-    <table id="table">
+    h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .navBtn {
+      border: 0;
+      background: #111827;
+      color: white;
+      padding: 9px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    .cardTitle {
+      color: #6b7280;
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .cardValue {
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    .tableWrap {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      overflow: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    table {
+      width: 100%;
+      min-width: 1000px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: #111827;
+      color: white;
+      padding: 10px 8px;
+      text-align: left;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    td {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 9px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      background: white;
+    }
+
+    tr:hover td {
+      background: #f9fafb;
+    }
+
+    .col-no { width: 50px; text-align: center; }
+    .col-hunter { width: 140px; }
+    .col-amount { width: 100px; text-align: right; }
+    .col-status { width: 100px; }
+    .col-date { width: 150px; }
+    .col-note { width: 260px; white-space: normal; font-size: 12px; color: #374151; }
+    .col-action { width: 120px; text-align: center; }
+
+    .statusPending {
+      color: #d97706;
+      font-weight: 900;
+    }
+
+    .statusPaid {
+      color: #059669;
+      font-weight: 900;
+    }
+
+    .statusReject {
+      color: #dc2626;
+      font-weight: 900;
+    }
+
+    .smallBtn {
+      border: 0;
+      background: #2563eb;
+      color: white;
+      padding: 7px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .muted {
+      color: #6b7280;
+    }
+
+.payPendingBtn {
+  border: 0;
+  background: #dc2626;
+  color: white;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.paidDoneBtn {
+  border: 0;
+  background: #2563eb;
+  color: white;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.linkBtn {
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+}
+
+.linkBtn:hover {
+  text-decoration: underline;
+}
+
+.popupBg {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 50;
+}
+
+.popupBox {
+  background: white;
+  width: 720px;
+  max-width: calc(100vw - 40px);
+  margin: 60px auto;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+}
+
+.popupClose {
+  float: right;
+  border: 0;
+  background: #111827;
+  color: white;
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.popupGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.popupMini {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <h2>Payout Dashboard</h2>
+    <button class="navBtn" onclick="location.href='/admin/review'">검수 페이지</button>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="cardTitle">TOTAL REQUESTS</div>
+      <div id="totalRequests" class="cardValue">-</div>
+    </div>
+    <div class="card">
+      <div class="cardTitle">PENDING</div>
+      <div id="pendingAmount" class="cardValue">$0.00</div>
+    </div>
+    <div class="card">
+      <div class="cardTitle">PAID</div>
+      <div id="paidAmount" class="cardValue">$0.00</div>
+    </div>
+    <div class="card">
+      <div class="cardTitle">HUNTERS</div>
+      <div id="hunterCount" class="cardValue">-</div>
+    </div>
+  </div>
+
+  <div class="tableWrap">
+    <table>
       <thead>
-        <tr>
-          <th>Hunter</th>
-          <th>Phone</th>
-          <th>Country</th>
-          <th>Date</th>
-          <th>Duration</th>
-          <th>Status</th>
-          <th>Reasons</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
+  <tr>
+    <th class="col-no">No</th>
+    <th class="col-hunter">Hunter</th>
+    <th class="col-hunter">Nickname</th>
+    <th class="col-status">Country</th>
+    <th class="col-amount">Uploads</th>
+    <th class="col-amount">Payable</th>
+    <th class="col-amount">Reject</th>
+    <th class="col-amount">Hold</th>
+    <th class="col-amount">Available</th>
+    <th class="col-amount">Paid</th>
+  </tr>
+</thead>
+<tbody id="rows"></tbody>
     </table>
+ </div>
 
-<div id="videoPopup" style="position:fixed; bottom:20px; right:20px; background:#000; padding:10px; display:none;">
-  <button onclick="closeVideo()">닫기</button><br/>
-  <video id="previewVideo" controls muted style="width:300px;"></video>
+<div id="popupBg" class="popupBg">
+  <div class="popupBox">
+    <button class="popupClose" onclick="closeHunterPopup()">닫기</button>
+
+    <h2 id="popupTitle">Hunter Detail</h2>
+
+    <div id="popupBody"></div>
+  </div>
 </div>
 
-    <div id="player"></div>
-
-    <script>
-     async function load(status = '') {
-  const url = status
-    ? '/admin/review-uploads?limit=50&status=' + encodeURIComponent(status)
-    : '/admin/review-uploads?limit=50';
-
-  const res = await fetch(url);
-  const data = await res.json();
-
-  const tbody = document.querySelector('tbody');
-  tbody.innerHTML = ''; // 🔥 이거 반드시 있어야 함
-
-  data.items.forEach(item => {
-    const tr = document.createElement('tr');
-
-   tr.innerHTML = \`
-  <td>\${item.hunter.nickname} (\${item.hunter_id})</td>
-  <td>\${item.hunter.phone}</td>
-  <td>\${item.hunter.country}</td>
-  <td>\${item.capture_date}</td>
-  <td>\${item.duration_minutes}</td>
-  <td>\${item.status}</td>
-  <td>\${item.reject_reasons.join(', ')}</td>
-  <td><button onclick="play('\${item.video_key}')">보기</button></td>
-\`;
-
-    tbody.appendChild(tr);
-  });
+<script>
+function safeText(v) {
+  if (v === null || v === undefined) return '';
+  return String(v);
 }
 
-     async function play(key) {
-  const res = await fetch('/admin/video-url?key=' + encodeURIComponent(key));
-  const data = await res.json();
-
-  const popup = document.getElementById('videoPopup');
-  const video = document.getElementById('previewVideo');
-
-  video.src = data.url;
-  popup.style.display = 'block';
+function money(v) {
+  return '$' + Number(v || 0).toFixed(2);
 }
 
-function closeVideo() {
-  const popup = document.getElementById('videoPopup');
-  const video = document.getElementById('previewVideo');
+function formatDate(dateStr) {
+  if (!dateStr) return '';
 
-  video.pause();
-  video.src = '';
-  popup.style.display = 'none';
+  const d = new Date(dateStr);
+
+  if (Number.isNaN(d.getTime())) {
+    return dateStr;
+  }
+
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0') + ' ' +
+    String(d.getHours()).padStart(2, '0') + ':' +
+    String(d.getMinutes()).padStart(2, '0');
 }
 
-      load();
-    </script>
+function statusClass(status) {
+  if (status === 'PAID') return 'statusPaid';
+  if (status === 'REJECT' || status === 'REJECTED') return 'statusReject';
+  return 'statusPending';
+}
 
-  </body>
-  </html>
+function getPayoutButton(request) {
+  const status = safeText(request.status || '').toLowerCase();
+
+  if (!request || !request.request_id) {
+    return '<span class="muted">요청 없음</span>';
+  }
+
+  if (status === 'paid') {
+    return '<button class="paidDoneBtn">지급 완료</button>';
+  }
+
+  return '<button class="payPendingBtn" onclick="alert(\\'수동 지급 후 paid 처리 API 연결 예정\\')">지급 예정</button>';
+}
+
+async function loadSummary() {
+  try {
+    const res = await fetch('/admin/payout-summary');
+    const data = await res.json();
+
+    if (!data.success) return;
+
+    document.getElementById('totalRequests').innerText =
+      data.total_requests ?? data.totalRequests ?? data.total ?? '-';
+
+    document.getElementById('pendingAmount').innerText =
+      money(data.pending_amount_usd ?? data.pendingAmountUsd ?? data.pending ?? 0);
+
+    document.getElementById('paidAmount').innerText =
+      money(data.paid_amount_usd ?? data.paidAmountUsd ?? data.paid ?? 0);
+
+   const huntersValue =
+  data.hunter_count ??
+  data.hunterCount ??
+  data.hunters ??
+  [];
+
+document.getElementById('hunterCount').innerText =
+  Array.isArray(huntersValue)
+    ? huntersValue.length
+    : huntersValue;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function loadHunters() {
+  const rows = document.getElementById('rows');
+
+  rows.innerHTML =
+    '<tr><td colspan="10" class="muted">Loading...</td></tr>';
+
+  try {
+    const res = await fetch('/admin/payout-summary');
+    const data = await res.json();
+
+    if (!data.success) {
+      rows.innerHTML = '<tr><td colspan="10">Failed to load hunters</td></tr>';
+      return;
+    }
+
+    const hunters = data.hunters || [];
+    const requests = data.payout_requests || [];
+
+    if (!hunters.length) {
+      rows.innerHTML = '<tr><td colspan="10">No hunters</td></tr>';
+      return;
+    }
+
+    rows.innerHTML = '';
+
+    hunters.forEach(function(hunter, index) {
+      const hunterRequests = requests.filter(function(r) {
+        return r.hunter_id === hunter.hunter_id;
+      });
+
+      const latestRequest = hunterRequests[0] || {};
+      const tr = document.createElement('tr');
+
+      tr.innerHTML =
+        '<td class="col-no">' + (index + 1) + '</td>' +
+
+        '<td class="col-hunter"><button class="linkBtn">' +
+          safeText(hunter.hunter_id) +
+        '</button></td>' +
+
+        '<td class="col-hunter"><button class="linkBtn">' +
+          safeText(hunter.nickname || '-') +
+        '</button></td>' +
+
+        '<td class="col-amount">' +
+          money(hunter.total_earnings || 0) +
+        '</td>' +
+
+        '<td class="col-amount">' +
+          money(hunter.available_balance || 0) +
+        '</td>' +
+
+        '<td class="col-amount">' +
+          money(latestRequest.amount || 0) +
+        '</td>' +
+
+        '<td class="col-date">' +
+          formatDate(latestRequest.created_at || '') +
+        '</td>' +
+
+        '<td class="col-status ' + statusClass(safeText(latestRequest.status || 'NONE').toUpperCase()) + '">' +
+          safeText(latestRequest.status || 'NONE') +
+        '</td>' +
+
+       '<td class="col-action">' +
+        getPayoutButton(latestRequest) +
+       '</td>' +
+
+        '<td class="col-date">' +
+          formatDate(latestRequest.paid_at || '') +
+        '</td>';
+
+      const buttons = tr.querySelectorAll('.linkBtn');
+      buttons.forEach(function(btn) {
+        btn.onclick = function() {
+          openHunterPopup(hunter, hunterRequests);
+        };
+      });
+
+      rows.appendChild(tr);
+    });
+
+  } catch (e) {
+    console.error(e);
+    rows.innerHTML = '<tr><td colspan="10">Error loading hunters</td></tr>';
+  }
+}
+function openHunterPopup(hunter, requests) {
+
+  const bg = document.getElementById('popupBg');
+  const title = document.getElementById('popupTitle');
+  const body = document.getElementById('popupBody');
+
+  title.innerText =
+    safeText(hunter.nickname || '-') +
+    ' / ' +
+    safeText(hunter.hunter_id);
+
+  let requestRows = '';
+
+  if (!requests.length) {
+
+    requestRows =
+      '<tr><td colspan="5">페이아웃 요청 없음</td></tr>';
+
+  } else {
+
+    requests.forEach(function(r) {
+
+      requestRows +=
+        '<tr>' +
+          '<td>' + money(r.amount || 0) + '</td>' +
+          '<td>' + safeText(r.status || '') + '</td>' +
+          '<td>' + formatDate(r.created_at || '') + '</td>' +
+          '<td>' + formatDate(r.approved_at || '') + '</td>' +
+          '<td>' + formatDate(r.paid_at || '') + '</td>' +
+        '</tr>';
+
+    });
+
+  }
+
+  body.innerHTML =
+
+    '<div class="popupGrid">' +
+
+      '<div class="popupMini"><b>총 번 금액</b><br>' +
+        money(hunter.total_earnings || 0) +
+      '</div>' +
+
+      '<div class="popupMini"><b>가용 정산금</b><br>' +
+        money(hunter.available_balance || 0) +
+      '</div>' +
+
+      '<div class="popupMini"><b>지급 완료</b><br>' +
+        money(hunter.paid_total || 0) +
+      '</div>' +
+
+      '<div class="popupMini"><b>총 업로드</b><br>' +
+        Number(hunter.total_uploads || 0) +
+      '</div>' +
+
+      '<div class="popupMini"><b>승인</b><br>' +
+        Number(hunter.payable_uploads || 0) +
+      '</div>' +
+
+      '<div class="popupMini"><b>리젝</b><br>' +
+        Number(hunter.rejected_uploads || 0) +
+      '</div>' +
+
+    '</div>' +
+
+    '<h3>페이아웃 내역</h3>' +
+
+    '<table style="width:100%; border-collapse:collapse;">' +
+
+      '<thead>' +
+        '<tr>' +
+          '<th>Amount</th>' +
+          '<th>Status</th>' +
+          '<th>Request</th>' +
+          '<th>Approved</th>' +
+          '<th>Paid</th>' +
+        '</tr>' +
+      '</thead>' +
+
+      '<tbody>' +
+        requestRows +
+      '</tbody>' +
+
+    '</table>';
+
+  bg.style.display = 'block';
+}
+
+function closeHunterPopup() {
+  document.getElementById('popupBg').style.display = 'none';
+}
+
+loadSummary();
+loadHunters();
+</script>
+
+</body>
+</html>
   `);
 });
 
@@ -738,6 +1205,349 @@ app.get('/api/v1/app-version-policy', (req, res) => {
     update_url: 'https://expo.dev/accounts/origindatalab/projects/new-hunter-app/builds/9f0a480d-7227-4226-b752-73c3515758c0',
     message: 'A required update is available. Please update the Hunter App.'
   });
+});
+
+app.get('/admin/review', (req, res) => {
+res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Review Uploads</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: Arial, sans-serif;
+      background: #f5f6f8;
+      color: #111827;
+      font-size: 13px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    #summary {
+      font-weight: 700;
+      color: #374151;
+    }
+
+    .filters {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .filters button {
+      border: 1px solid #d1d5db;
+      background: #fff;
+      padding: 7px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .filters button:hover {
+      background: #eef2ff;
+    }
+
+    .tableWrap {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      overflow: auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    table {
+      width: 100%;
+      min-width: 1520px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: #111827;
+      color: #fff;
+      padding: 9px 8px;
+      text-align: left;
+      font-size: 12px;
+      white-space: nowrap;
+      z-index: 2;
+    }
+
+    td {
+      border-bottom: 1px solid #e5e7eb;
+      padding: 8px;
+      vertical-align: top;
+      background: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    tr:hover td {
+      background: #f9fafb;
+    }
+
+    tr.selected td {
+      background: #eef2ff;
+    }
+
+    .col-no { width: 44px; text-align: center; }
+    .col-uploaded { width: 135px; }
+    .col-hunter { width: 120px; }
+    .col-nickname { width: 95px; }
+    .col-country { width: 65px; }
+    .col-city { width: 85px; }
+    .col-duration { width: 70px; text-align: right; }
+    .col-status { width: 80px; }
+    .col-usd { width: 70px; text-align: right; }
+    .col-reject { width: 290px; }
+    .col-warning { width: 240px; }
+    .col-preview { width: 320px; }
+
+    .reason {
+      white-space: normal;
+      line-height: 1.35;
+      font-size: 11px;
+      color: #374151;
+      max-height: 48px;
+      overflow: hidden;
+    }
+
+    .statusReject {
+      color: #dc2626;
+      font-weight: 800;
+    }
+
+    .statusApprove {
+      color: #059669;
+      font-weight: 800;
+    }
+
+    .statusHold {
+      color: #d97706;
+      font-weight: 800;
+    }
+
+    .previewBtn {
+      border: 0;
+      background: #2563eb;
+      color: white;
+      padding: 7px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .previewBtn:hover {
+      background: #1d4ed8;
+    }
+
+    .inlinePreview {
+      display: none;
+      width: 300px;
+      height: 170px;
+      background: #000;
+      border-radius: 8px;
+      object-fit: contain;
+    }
+
+    .inlinePreview.show {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <h2>Review Uploads</h2>
+    <div id="summary">Loading...</div>
+  </div>
+
+ <div class="filters">
+  <button onclick="load('')">ALL</button>
+  <button onclick="load('APPROVE')">APPROVE</button>
+  <button onclick="load('REJECT')">REJECT</button>
+  <button onclick="load('HOLD')">HOLD</button>
+
+  <button
+    onclick="location.href='/admin/payouts'"
+    style="
+      margin-left:16px;
+      background:#111827;
+      color:white;
+      border:1px solid #111827;
+    "
+  >
+    정산 페이지
+  </button>
+</div>
+
+  <div class="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="col-no">No</th>
+          <th class="col-uploaded">Uploaded At</th>
+          <th class="col-hunter">Hunter</th>
+          <th class="col-nickname">Nickname</th>
+          <th class="col-country">Country</th>
+          <th class="col-city">City</th>
+          <th class="col-duration">Min</th>
+          <th class="col-status">Status</th>
+          <th class="col-usd">USD</th>
+          <th class="col-reject">Reject</th>
+          <th class="col-warning">Warning</th>
+          <th class="col-preview">Preview</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+<script>
+let selectedRow = null;
+
+function safeText(value) {
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+function extractUploadedAt(item) {
+  const source = item.s3_prefix || item.s3_key || item.video_key || '';
+  const match = source.match(/capture_(\\d{8})T(\\d{6})Z/);
+
+  if (!match) {
+    return item.uploaded_at || item.created_at || item.capture_date || '';
+  }
+
+  const y = match[1].slice(0, 4);
+  const m = match[1].slice(4, 6);
+  const d = match[1].slice(6, 8);
+  const hh = match[2].slice(0, 2);
+  const mm = match[2].slice(2, 4);
+
+  return y + '-' + m + '-' + d + ' ' + hh + ':' + mm;
+}
+
+function getStatusClass(status) {
+  if (status === 'REJECT') return 'statusReject';
+  if (status === 'HOLD') return 'statusHold';
+  return 'statusApprove';
+}
+
+async function load(status) {
+  const summary = document.getElementById('summary');
+  const rows = document.getElementById('rows');
+
+  summary.innerText = 'Loading...';
+  rows.innerHTML = '';
+
+  const url = status
+    ? '/admin/review-uploads?limit=100&status=' + encodeURIComponent(status)
+    : '/admin/review-uploads?limit=100';
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if (!data.success) {
+    summary.innerText = 'Failed to load';
+    return;
+  }
+
+  summary.innerText = 'Total: ' + data.total + ' / Filter: ' + (status || 'ALL');
+
+  (data.items || []).forEach(function(item, index) {
+    const hunter = item.hunter || {};
+    const tr = document.createElement('tr');
+
+    const no = index + 1;
+    const uploadedAt = extractUploadedAt(item);
+    const hunterId = safeText(item.hunter_id || hunter.hunter_id);
+    const nickname = safeText(hunter.nickname);
+    const country = safeText(hunter.country);
+    const city = safeText(hunter.city);
+    const duration = Number(item.duration_minutes || 0).toFixed(2);
+    const statusText = safeText(item.status);
+    const usd = Number(item.estimated_earning_usd || 0).toFixed(2);
+    const rejectText = safeText((item.reject_reasons || []).join(', '));
+    const warningText = safeText((item.review_warnings || []).join(', '));
+    const videoId = 'preview_' + index;
+
+    tr.innerHTML =
+      '<td class="col-no">' + no + '</td>' +
+      '<td class="col-uploaded" title="' + uploadedAt + '">' + uploadedAt + '</td>' +
+      '<td class="col-hunter" title="' + hunterId + '">' + hunterId + '</td>' +
+      '<td class="col-nickname" title="' + nickname + '">' + nickname + '</td>' +
+      '<td class="col-country" title="' + country + '">' + country + '</td>' +
+      '<td class="col-city" title="' + city + '">' + city + '</td>' +
+      '<td class="col-duration">' + duration + '</td>' +
+      '<td class="col-status ' + getStatusClass(statusText) + '">' + statusText + '</td>' +
+      '<td class="col-usd">$' + usd + '</td>' +
+      '<td class="col-reject"><div class="reason" title="' + rejectText + '">' + rejectText + '</div></td>' +
+      '<td class="col-warning"><div class="reason" title="' + warningText + '">' + warningText + '</div></td>' +
+      '<td class="col-preview">' +
+        '<button class="previewBtn">보기</button>' +
+        '<video id="' + videoId + '" class="inlinePreview" controls muted></video>' +
+      '</td>';
+
+    tr.querySelector('.previewBtn').onclick = function() {
+      previewVideo(videoId, item.video_key, tr);
+    };
+
+    rows.appendChild(tr);
+  });
+}
+
+async function previewVideo(videoId, videoKey, row) {
+  if (!videoKey) {
+    alert('video_key 없음');
+    return;
+  }
+
+  if (selectedRow) selectedRow.classList.remove('selected');
+  row.classList.add('selected');
+  selectedRow = row;
+
+  const video = document.getElementById(videoId);
+
+  if (video.src) {
+    video.classList.toggle('show');
+    return;
+  }
+
+  const res = await fetch('/admin/video-url?key=' + encodeURIComponent(videoKey));
+  const data = await res.json();
+
+  if (!data.success || !data.url) {
+    alert('영상 URL 생성 실패');
+    return;
+  }
+
+  video.src = data.url;
+  video.classList.add('show');
+}
+
+load('');
+</script>
+
+</body>
+</html>
+`);
 });
 
 app.get('/admin/review-uploads', async (req, res) => {
@@ -1278,6 +2088,482 @@ app.get('/hunter/rankings', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false });
+  }
+});
+
+app.get('/hunter/payout-summary', async (req, res) => {
+  try {
+    const hunterId = req.query.hunter_id;
+
+    if (!hunterId) {
+      return res.status(400).json({
+        success: false,
+        message: 'hunter_id is required',
+      });
+    }
+
+    const keys = await listCaptureMetadataKeys();
+
+    let captureEarnings = 0;
+    let matchedUploads = 0;
+    let payableUploads = 0;
+    let rejectedUploads = 0;
+    let holdUploads = 0;
+
+    for (const key of keys) {
+      try {
+        const prefix = getCapturePrefixFromMetadataKey(key);
+        const uploadStatus = await getUploadFileStatus(prefix);
+
+        if (!uploadStatus.strictComplete) continue;
+
+        const metadata = await readJsonFromS3(key);
+        const metadataHunterId = extractHunterId(metadata, key);
+
+        if (metadataHunterId !== hunterId) continue;
+
+        const review = getAutoReview(metadata, {
+          uploadComplete: uploadStatus.strictComplete,
+          uploadMissing: uploadStatus.missing,
+        });
+
+        const estimated = calculatePayableEarning(metadata, review);
+
+        matchedUploads += 1;
+
+        if (review.status === 'REJECT') {
+          rejectedUploads += 1;
+        } else if (review.status === 'HOLD') {
+          holdUploads += 1;
+        } else if (review.payable) {
+          payableUploads += 1;
+          captureEarnings += estimated;
+        }
+      } catch (itemError) {
+        console.error('PAYOUT_SUMMARY_ITEM_ERROR:', itemError);
+      }
+    }
+
+    const payoutRequests = readPayoutRequests()
+      .filter((item) => item.hunter_id === hunterId);
+
+    const paidTotal = payoutRequests
+      .filter((item) => item.status === 'paid')
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+    const pendingPayout = payoutRequests
+      .filter((item) => item.status === 'requested' || item.status === 'approved')
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+    const recruitEarnings = 0;
+    const leaderBonus = 0;
+
+    const totalEarnings = captureEarnings + recruitEarnings + leaderBonus;
+    const availableBalance = Math.max(totalEarnings - paidTotal - pendingPayout, 0);
+
+    return res.json({
+      success: true,
+      hunter_id: hunterId,
+      currency: 'USD',
+
+      capture_earnings: Number(captureEarnings.toFixed(2)),
+      recruit_earnings: Number(recruitEarnings.toFixed(2)),
+      leader_bonus: Number(leaderBonus.toFixed(2)),
+      total_earnings: Number(totalEarnings.toFixed(2)),
+
+      paid_total: Number(paidTotal.toFixed(2)),
+      pending_payout: Number(pendingPayout.toFixed(2)),
+      available_balance: Number(availableBalance.toFixed(2)),
+
+      minimum_payout: 8,
+
+      matched_uploads: matchedUploads,
+      payable_uploads: payableUploads,
+      rejected_uploads: rejectedUploads,
+      hold_uploads: holdUploads,
+
+      payout_requests: payoutRequests,
+    });
+  } catch (error) {
+    console.error('PAYOUT_SUMMARY_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load payout summary',
+    });
+  }
+});
+
+app.post('/hunter/payout-request', (req, res) => {
+  try {
+    const { hunter_id, amount } = req.body;
+
+    if (!hunter_id || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'hunter_id and amount are required',
+      });
+    }
+
+    const items = readPayoutRequests();
+
+    const newRequest = {
+      request_id: `PR-${Date.now()}`,
+      hunter_id,
+      amount: Number(amount),
+      status: 'requested',
+      created_at: new Date().toISOString(),
+    };
+
+    items.push(newRequest);
+    writePayoutRequests(items);
+
+    return res.json({
+      success: true,
+      request: newRequest,
+    });
+  } catch (error) {
+    console.error('PAYOUT_REQUEST_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create payout request',
+    });
+  }
+});
+
+app.get('/admin/payout-requests', (req, res) => {
+  try {
+    const items = readPayoutRequests();
+
+    const sortedItems = items.sort((a, b) => {
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    return res.json({
+      success: true,
+      total: sortedItems.length,
+      items: sortedItems,
+    });
+  } catch (error) {
+    console.error('ADMIN_PAYOUT_REQUESTS_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load payout requests',
+    });
+  }
+});
+
+app.get('/admin/payout-summary', async (req, res) => {
+  try {
+    const keys = await listCaptureMetadataKeys();
+    const payoutRequests = readPayoutRequests();
+
+    const hunterMap = {};
+
+    for (const key of keys) {
+      try {
+        const prefix = getCapturePrefixFromMetadataKey(key);
+        const uploadStatus = await getUploadFileStatus(prefix);
+
+        if (!uploadStatus.strictComplete) continue;
+
+        const metadata = await readJsonFromS3(key);
+        const hunterId = extractHunterId(metadata, key);
+
+        if (!hunterId) continue;
+
+        const nickname =
+          metadata.hunter?.nickname ||
+          metadata.hunter_profile?.nickname ||
+          metadata.nickname ||
+          '';
+
+        const country =
+          metadata.hunter?.country ||
+          metadata.hunter_profile?.country ||
+          metadata.location?.country ||
+          metadata.country ||
+          '';
+
+        const city =
+          metadata.hunter?.city ||
+          metadata.hunter_profile?.city ||
+          metadata.location?.city ||
+          metadata.city ||
+          '';
+
+        if (!hunterMap[hunterId]) {
+          hunterMap[hunterId] = {
+            hunter_id: hunterId,
+            nickname,
+            country,
+            city,
+            capture_earnings: 0,
+            recruit_earnings: 0,
+            leader_bonus: 0,
+            total_earnings: 0,
+            paid_total: 0,
+            pending_payout: 0,
+            available_balance: 0,
+            total_uploads: 0,
+            payable_uploads: 0,
+            rejected_uploads: 0,
+            hold_uploads: 0,
+          };
+        }
+
+        const review = getAutoReview(metadata, {
+          uploadComplete: uploadStatus.strictComplete,
+          uploadMissing: uploadStatus.missing,
+        });
+
+        const estimated = calculatePayableEarning(metadata, review);
+
+        hunterMap[hunterId].total_uploads += 1;
+
+        if (review.status === 'REJECT') {
+          hunterMap[hunterId].rejected_uploads += 1;
+        } else if (review.status === 'HOLD') {
+          hunterMap[hunterId].hold_uploads += 1;
+        } else if (review.payable) {
+          hunterMap[hunterId].payable_uploads += 1;
+          hunterMap[hunterId].capture_earnings += estimated;
+        }
+      } catch (itemError) {
+        console.error('ADMIN_PAYOUT_SUMMARY_ITEM_ERROR:', itemError);
+      }
+    }
+
+    for (const item of payoutRequests) {
+      if (!hunterMap[item.hunter_id]) {
+        hunterMap[item.hunter_id] = {
+          hunter_id: item.hunter_id,
+          nickname: '',
+          country: '',
+          city: '',
+          capture_earnings: 0,
+          recruit_earnings: 0,
+          leader_bonus: 0,
+          total_earnings: 0,
+          paid_total: 0,
+          pending_payout: 0,
+          available_balance: 0,
+          total_uploads: 0,
+          payable_uploads: 0,
+          rejected_uploads: 0,
+          hold_uploads: 0,
+        };
+      }
+
+      if (item.status === 'paid') {
+        hunterMap[item.hunter_id].paid_total += Number(item.amount || 0);
+      }
+
+      if (item.status === 'requested' || item.status === 'approved') {
+        hunterMap[item.hunter_id].pending_payout += Number(item.amount || 0);
+      }
+    }
+
+    const hunters = Object.values(hunterMap).map((hunter) => {
+      hunter.total_earnings =
+        hunter.capture_earnings + hunter.recruit_earnings + hunter.leader_bonus;
+
+      hunter.available_balance = Math.max(
+        hunter.total_earnings - hunter.paid_total - hunter.pending_payout,
+        0
+      );
+
+      return {
+        ...hunter,
+        capture_earnings: Number(hunter.capture_earnings.toFixed(2)),
+        recruit_earnings: Number(hunter.recruit_earnings.toFixed(2)),
+        leader_bonus: Number(hunter.leader_bonus.toFixed(2)),
+        total_earnings: Number(hunter.total_earnings.toFixed(2)),
+        paid_total: Number(hunter.paid_total.toFixed(2)),
+        pending_payout: Number(hunter.pending_payout.toFixed(2)),
+        available_balance: Number(hunter.available_balance.toFixed(2)),
+      };
+    }).sort((a, b) => b.total_earnings - a.total_earnings);
+
+    return res.json({
+      success: true,
+      total_hunters: hunters.length,
+      hunters,
+      payout_requests: payoutRequests,
+    });
+  } catch (error) {
+    console.error('ADMIN_PAYOUT_SUMMARY_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load admin payout summary',
+    });
+  }
+});
+
+app.post('/admin/payout-requests/:request_id/approve', (req, res) => {
+  try {
+    const { request_id } = req.params;
+
+    const items = readPayoutRequests();
+    const target = items.find((item) => item.request_id === request_id);
+
+    if (!target) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payout request not found',
+      });
+    }
+
+    if (target.status !== 'requested') {
+      return res.status(400).json({
+        success: false,
+        message: `Only requested payout can be approved. Current status: ${target.status}`,
+      });
+    }
+
+    target.status = 'approved';
+    target.approved_at = new Date().toISOString();
+
+    writePayoutRequests(items);
+
+    return res.json({
+      success: true,
+      request: target,
+    });
+  } catch (error) {
+    console.error('ADMIN_PAYOUT_APPROVE_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to approve payout request',
+    });
+  }
+});
+
+app.post('/admin/payout-requests/:request_id/paid', (req, res) => {
+  try {
+    const { request_id } = req.params;
+
+    const items = readPayoutRequests();
+    const target = items.find((item) => item.request_id === request_id);
+
+    if (!target) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payout request not found',
+      });
+    }
+
+    if (target.status !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: `Only approved payout can be marked as paid. Current status: ${target.status}`,
+      });
+    }
+
+    target.status = 'paid';
+    target.paid_at = new Date().toISOString();
+
+    writePayoutRequests(items);
+
+    return res.json({
+      success: true,
+      request: target,
+    });
+  } catch (error) {
+    console.error('ADMIN_PAYOUT_PAID_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to mark payout as paid',
+    });
+  }
+});
+
+app.post('/api/v1/s3-presign', requireSupportedAppVersion, async (req, res) => {
+  try {
+    const {
+      hunterId,
+      captureId,
+      captureDate,
+    } = req.body || {};
+
+    if (!hunterId || !captureId || !captureDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'hunterId, captureId, captureDate are required',
+      });
+    }
+
+    const prefix = buildCapturePrefix({
+      date: captureDate,
+      hunterId,
+      captureId,
+    });
+
+    const videoKey = `${prefix}video_raw.mp4`;
+    const captureMetadataKey = `${prefix}capture_metadata_v1.json`;
+    const imuMetadataKey = `${prefix}imu_metadata_v1.json`;
+
+    const videoCommand = new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: videoKey,
+      ContentType: 'video/mp4',
+    });
+
+    const captureMetadataCommand = new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: captureMetadataKey,
+      ContentType: 'application/json',
+    });
+
+    const imuMetadataCommand = new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: imuMetadataKey,
+      ContentType: 'application/json',
+    });
+
+    const videoUrl = await getSignedUrl(s3, videoCommand, {
+      expiresIn: 3600,
+    });
+
+    const captureMetadataUrl = await getSignedUrl(
+      s3,
+      captureMetadataCommand,
+      {
+        expiresIn: 3600,
+      }
+    );
+
+    const imuMetadataUrl = await getSignedUrl(
+      s3,
+      imuMetadataCommand,
+      {
+        expiresIn: 3600,
+      }
+    );
+
+    console.log('S3_PRESIGN_CREATED', {
+      hunterId,
+      captureId,
+      prefix,
+    });
+
+    return res.json({
+      success: true,
+      s3Prefix: prefix,
+      uploadCompleteMode: 'server_verified_only',
+      finalizeEndpoint: '/api/v1/upload-complete',
+      urls: {
+        video: videoUrl,
+        captureMetadata: captureMetadataUrl,
+        imuMetadata: imuMetadataUrl,
+      },
+    });
+  } catch (error) {
+    console.error('S3_PRESIGN_ERROR:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create presigned URLs',
+    });
   }
 });
 
