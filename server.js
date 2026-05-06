@@ -2479,18 +2479,20 @@ app.post('/admin/payout-requests/:request_id/paid', (req, res) => {
 
 app.post('/api/v1/s3-presign', async (req, res) => {
   try {
-    const {
-      hunterId,
-      captureId,
-      captureDate,
-    } = req.body || {};
+   const { prefix, files } = req.body || {};
 
-    if (!hunterId || !captureId || !captureDate) {
-      return res.status(400).json({
-        success: false,
-        message: 'hunterId, captureId, captureDate are required',
-      });
-    }
+if (!prefix || !files?.video || !files?.captureMetadata || !files?.imuMetadata) {
+  return res.status(400).json({
+    success: false,
+    message: 'prefix and files.video/captureMetadata/imuMetadata are required',
+  });
+}
+
+const safePrefix = prefix.startsWith('real/') ? prefix : `real/${prefix}`;
+
+const videoKey = `${safePrefix}${files.video}`;
+const captureMetadataKey = `${safePrefix}${files.captureMetadata}`;
+const imuMetadataKey = `${safePrefix}${files.imuMetadata}`;
 
     const prefix = buildCapturePrefix({
       date: captureDate,
