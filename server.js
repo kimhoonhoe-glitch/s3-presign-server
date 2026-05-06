@@ -2494,16 +2494,6 @@ const videoKey = `${safePrefix}${files.video}`;
 const captureMetadataKey = `${safePrefix}${files.captureMetadata}`;
 const imuMetadataKey = `${safePrefix}${files.imuMetadata}`;
 
-    const prefix = buildCapturePrefix({
-      date: captureDate,
-      hunterId,
-      captureId,
-    });
-
-    const videoKey = `${prefix}video_raw.mp4`;
-    const captureMetadataKey = `${prefix}capture_metadata_v1.json`;
-    const imuMetadataKey = `${prefix}imu_metadata_v1.json`;
-
     const videoCommand = new PutObjectCommand({
       Bucket: BUCKET,
       Key: videoKey,
