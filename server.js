@@ -2477,7 +2477,7 @@ app.post('/admin/payout-requests/:request_id/paid', (req, res) => {
   }
 });
 
-app.post('/api/v1/s3-presign', requireSupportedAppVersion, async (req, res) => {
+app.post('/api/v1/s3-presign', async (req, res) => {
   try {
     const {
       hunterId,
