@@ -83,7 +83,7 @@ const REQUIRED_UPLOAD_FILES = {
 };
 
 const UPLOAD_COMPLETE_FILE = 'upload_complete.json';
-const MIN_DURATION_MS = 180000;
+const MIN_DURATION_MS = 90000;
 const MULTIPART_EXPIRES_IN_SECONDS = 900;
 
 const MIN_SUPPORTED_APP_VERSION = '1.0.3';
@@ -743,6 +743,7 @@ app.get('/admin/payouts', (req, res) => {
 
     .col-no { width: 50px; text-align: center; }
     .col-hunter { width: 140px; }
+    .col-phone { width: 125px; }
     .col-amount { width: 100px; text-align: right; }
     .col-status { width: 100px; }
     .col-date { width: 150px; }
@@ -882,18 +883,20 @@ app.get('/admin/payouts', (req, res) => {
 
   <div class="tableWrap">
     <table>
-      <thead>
+   <thead>
   <tr>
-    <th class="col-no">No</th>
-    <th class="col-hunter">Hunter</th>
-    <th class="col-hunter">Nickname</th>
-    <th class="col-status">Country</th>
-    <th class="col-amount">Uploads</th>
-    <th class="col-amount">Payable</th>
-    <th class="col-amount">Reject</th>
-    <th class="col-amount">Hold</th>
-    <th class="col-amount">Available</th>
-    <th class="col-amount">Paid</th>
+    <th>No</th>
+    <th>Upload ID</th>
+    <th>Hunter</th>
+    <th>Nickname</th>
+    <th>Phone</th>
+    <th>Country</th>
+    <th>City</th>
+    <th>Time</th>
+    <th>Status</th>
+    <th>Reject</th>
+    <th>Hold</th>
+    <th>Available</th>
   </tr>
 </thead>
 <tbody id="rows"></tbody>
@@ -1030,6 +1033,14 @@ async function loadHunters() {
         '<td class="col-hunter"><button class="linkBtn">' +
           safeText(hunter.nickname || '-') +
         '</button></td>' +
+
+        '<td class="col-phone" title="' + safeText(hunter.phone) + '">' +
+          safeText(hunter.phone || '-') +
+        '</td>' +
+
+        '<td class="col-status" title="' + safeText(hunter.country) + '">' +
+          safeText(hunter.country || '-') +
+        '</td>' +
 
         '<td class="col-amount">' +
           money(hunter.total_earnings || 0) +
@@ -1183,7 +1194,7 @@ app.get('/health', (req, res) => {
     region: REGION,
     upload_complete_mode: 'server_verified_only',
     required_files: REQUIRED_UPLOAD_FILES,
-    minimum_duration_minutes: 3,
+    minimum_duration_minutes: 1.5,
     multipart_upload_enabled: true,
     multipart_endpoints: [
       '/api/v1/s3-multipart/create',
@@ -1309,6 +1320,7 @@ res.send(`
     .col-uploaded { width: 135px; }
     .col-hunter { width: 120px; }
     .col-nickname { width: 95px; }
+    .col-phone { width: 125px; }
     .col-country { width: 65px; }
     .col-city { width: 85px; }
     .col-duration { width: 70px; text-align: right; }
@@ -1356,6 +1368,21 @@ res.send(`
     .previewBtn:hover {
       background: #1d4ed8;
     }
+
+   .closePreviewBtn {
+     border: 0;
+     background: #6b7280;
+     color: white;
+     padding: 7px 12px;
+     border-radius: 8px;
+     cursor: pointer;
+     font-weight: 800;
+     margin-bottom: 8px;
+   }
+
+    .closePreviewBtn:hover {
+      background: #374151;
+   }
 
     .inlinePreview {
       display: none;
@@ -1405,6 +1432,7 @@ res.send(`
           <th class="col-uploaded">Uploaded At</th>
           <th class="col-hunter">Hunter</th>
           <th class="col-nickname">Nickname</th>
+          <th class="col-phone">Phone</th>
           <th class="col-country">Country</th>
           <th class="col-city">City</th>
           <th class="col-duration">Min</th>
@@ -1479,6 +1507,7 @@ async function load(status) {
     const uploadedAt = extractUploadedAt(item);
     const hunterId = safeText(item.hunter_id || hunter.hunter_id);
     const nickname = safeText(hunter.nickname);
+    const phone = safeText(hunter.phone);
     const country = safeText(hunter.country);
     const city = safeText(hunter.city);
     const duration = Number(item.duration_minutes || 0).toFixed(2);
@@ -1493,6 +1522,7 @@ async function load(status) {
       '<td class="col-uploaded" title="' + uploadedAt + '">' + uploadedAt + '</td>' +
       '<td class="col-hunter" title="' + hunterId + '">' + hunterId + '</td>' +
       '<td class="col-nickname" title="' + nickname + '">' + nickname + '</td>' +
+      '<td class="col-phone" title="' + phone + '">' + phone + '</td>' +
       '<td class="col-country" title="' + country + '">' + country + '</td>' +
       '<td class="col-city" title="' + city + '">' + city + '</td>' +
       '<td class="col-duration">' + duration + '</td>' +
@@ -1501,13 +1531,18 @@ async function load(status) {
       '<td class="col-reject"><div class="reason" title="' + rejectText + '">' + rejectText + '</div></td>' +
       '<td class="col-warning"><div class="reason" title="' + warningText + '">' + warningText + '</div></td>' +
       '<td class="col-preview">' +
-        '<button class="previewBtn">보기</button>' +
-        '<video id="' + videoId + '" class="inlinePreview" controls muted></video>' +
-      '</td>';
+      '<button class="previewBtn">보기</button> ' +
+      '<button class="closePreviewBtn">닫기</button>' +
+      '<video id="' + videoId + '" class="inlinePreview" controls muted></video>' +
+    '</td>';
 
-    tr.querySelector('.previewBtn').onclick = function() {
-      previewVideo(videoId, item.video_key, tr);
-    };
+  tr.querySelector('.previewBtn').onclick = function() {
+  previewVideo(videoId, item.video_key, tr);
+};
+
+tr.querySelector('.closePreviewBtn').onclick = function() {
+  closePreview(videoId, tr);
+};
 
     rows.appendChild(tr);
   });
@@ -1540,6 +1575,25 @@ async function previewVideo(videoId, videoKey, row) {
 
   video.src = data.url;
   video.classList.add('show');
+}
+
+function closePreview(videoId, row) {
+  const video = document.getElementById(videoId);
+
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    video.classList.remove('show');
+  }
+
+  if (row) {
+    row.classList.remove('selected');
+  }
+
+  if (selectedRow === row) {
+    selectedRow = null;
+  }
 }
 
 load('');
@@ -2277,6 +2331,18 @@ app.get('/admin/payout-summary', async (req, res) => {
           metadata.nickname ||
           '';
 
+        const phone =
+          metadata.hunter?.phone ||
+          metadata.hunter?.phone_number ||
+          metadata.hunter?.phoneNumber ||
+          metadata.hunter_profile?.phone ||
+          metadata.hunter_profile?.phone_number ||
+          metadata.hunter_profile?.phoneNumber ||
+          metadata.phone ||
+          metadata.phone_number ||
+          metadata.phoneNumber ||
+          '';
+
         const country =
           metadata.hunter?.country ||
           metadata.hunter_profile?.country ||
@@ -2295,8 +2361,10 @@ app.get('/admin/payout-summary', async (req, res) => {
           hunterMap[hunterId] = {
             hunter_id: hunterId,
             nickname,
+            phone,
             country,
             city,
+            latest_sort_key: key,
             capture_earnings: 0,
             recruit_earnings: 0,
             leader_bonus: 0,
@@ -2309,6 +2377,26 @@ app.get('/admin/payout-summary', async (req, res) => {
             rejected_uploads: 0,
             hold_uploads: 0,
           };
+        } else {
+          if (!hunterMap[hunterId].phone && phone) {
+            hunterMap[hunterId].phone = phone;
+          }
+
+          if (!hunterMap[hunterId].nickname && nickname) {
+            hunterMap[hunterId].nickname = nickname;
+          }
+
+          if (!hunterMap[hunterId].country && country) {
+            hunterMap[hunterId].country = country;
+          }
+
+          if (!hunterMap[hunterId].city && city) {
+            hunterMap[hunterId].city = city;
+          }
+
+          if (String(key) > String(hunterMap[hunterId].latest_sort_key || '')) {
+            hunterMap[hunterId].latest_sort_key = key;
+          }
         }
 
         const review = getAutoReview(metadata, {
@@ -2338,8 +2426,10 @@ app.get('/admin/payout-summary', async (req, res) => {
         hunterMap[item.hunter_id] = {
           hunter_id: item.hunter_id,
           nickname: '',
+          phone: '',
           country: '',
           city: '',
+          latest_sort_key: item.created_at || '',
           capture_earnings: 0,
           recruit_earnings: 0,
           leader_bonus: 0,
@@ -2352,6 +2442,10 @@ app.get('/admin/payout-summary', async (req, res) => {
           rejected_uploads: 0,
           hold_uploads: 0,
         };
+      }
+
+      if (item.created_at && String(item.created_at) > String(hunterMap[item.hunter_id].latest_sort_key || '')) {
+        hunterMap[item.hunter_id].latest_sort_key = item.created_at;
       }
 
       if (item.status === 'paid') {
@@ -2382,7 +2476,9 @@ app.get('/admin/payout-summary', async (req, res) => {
         pending_payout: Number(hunter.pending_payout.toFixed(2)),
         available_balance: Number(hunter.available_balance.toFixed(2)),
       };
-    }).sort((a, b) => b.total_earnings - a.total_earnings);
+    }).sort((a, b) => {
+      return String(b.latest_sort_key || '').localeCompare(String(a.latest_sort_key || ''));
+    });
 
     return res.json({
       success: true,
@@ -2887,14 +2983,14 @@ app.post('/api/v1/upload-complete', async (req, res) => {
     const durationMs = durationMinutes * 60 * 1000;
 
     if (!durationMs || durationMs < MIN_DURATION_MS) {
-      return res.status(400).json({
-        success: false,
-        error: 'UNDER_3_MINUTES',
-        message: 'Video duration must be at least 3 minutes before completion',
-        duration_minutes: Number(durationMinutes.toFixed(2)),
-        minimum_duration_minutes: 3,
-      });
-    }
+  return res.status(400).json({
+    success: false,
+    error: 'UNDER_MIN_DURATION',
+    message: 'Video duration must be at least 90 seconds before completion',
+    duration_minutes: Number(durationMinutes.toFixed(2)),
+    minimum_duration_minutes: 1.5,
+  });
+}
 
     const review = getAutoReview(metadata, {
       uploadComplete: true,
@@ -2942,8 +3038,8 @@ app.get('/api/v1/today-mission', (req, res) => {
   const mission = {
     id: "mission_traffic_basic",
     title: "Street Traffic Capture",
-    description: "Record moving traffic for at least 3 minutes.",
-    minimum_minutes: 3,
+    description: "Record moving traffic for at least 90 seconds.",
+    minimum_minutes: 1.5,
     recommended_minutes: 10,
     target_scene: "road_traffic",
     camera_mode: "forward",

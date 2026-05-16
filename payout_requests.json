@@ -1,0 +1,11 @@
+[
+  {
+    "request_id": "PR-1777962826582",
+    "hunter_id": "HTR-TEST01",
+    "amount": 10,
+    "status": "paid",
+    "created_at": "2026-05-05T06:33:46.582Z",
+    "approved_at": "2026-05-05T06:39:58.156Z",
+    "paid_at": "2026-05-05T06:42:13.819Z"
+  }
+]
