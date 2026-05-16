@@ -83,7 +83,7 @@ const REQUIRED_UPLOAD_FILES = {
 };
 
 const UPLOAD_COMPLETE_FILE = 'upload_complete.json';
-const MIN_DURATION_MS = 75000;
+const MIN_DURATION_MS = 30000;
 const MULTIPART_EXPIRES_IN_SECONDS = 900;
 
 const MIN_SUPPORTED_APP_VERSION = '1.0.3';
@@ -1194,7 +1194,7 @@ app.get('/health', (req, res) => {
     region: REGION,
     upload_complete_mode: 'server_verified_only',
     required_files: REQUIRED_UPLOAD_FILES,
-    minimum_duration_minutes: 1.5,
+    minimum_duration_minutes: 0.5,
     multipart_upload_enabled: true,
     multipart_endpoints: [
       '/api/v1/s3-multipart/create',
@@ -2986,9 +2986,9 @@ app.post('/api/v1/upload-complete', async (req, res) => {
   return res.status(400).json({
     success: false,
     error: 'UNDER_MIN_DURATION',
-   message: 'Video duration must be at least 75 seconds before completion',
+    message: 'Video duration must be at least 30 seconds before completion',
     duration_minutes: Number(durationMinutes.toFixed(2)),
-    minimum_duration_minutes: 1.25,
+    minimum_duration_minutes: 0.5,
   });
 }
 
