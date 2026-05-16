@@ -83,7 +83,7 @@ const REQUIRED_UPLOAD_FILES = {
 };
 
 const UPLOAD_COMPLETE_FILE = 'upload_complete.json';
-const MIN_DURATION_MS = 90000;
+const MIN_DURATION_MS = 75000;
 const MULTIPART_EXPIRES_IN_SECONDS = 900;
 
 const MIN_SUPPORTED_APP_VERSION = '1.0.3';
@@ -2986,9 +2986,9 @@ app.post('/api/v1/upload-complete', async (req, res) => {
   return res.status(400).json({
     success: false,
     error: 'UNDER_MIN_DURATION',
-    message: 'Video duration must be at least 90 seconds before completion',
+   message: 'Video duration must be at least 75 seconds before completion',
     duration_minutes: Number(durationMinutes.toFixed(2)),
-    minimum_duration_minutes: 1.5,
+    minimum_duration_minutes: 1.25,
   });
 }
 
