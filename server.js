@@ -490,15 +490,15 @@ const getAutoReview = (metadata, options = {}) => {
   }
 
   if (gpsCommercialAssessment.gps_reject_recommended === true) {
-    reasons.push('GPS_REJECT_RECOMMENDED');
+    warnings.push('GPS_REJECT_RECOMMENDED');
   }
 
   if (segmentabilityHint.reject_segment_candidate === true) {
-    reasons.push('SEGMENT_REJECT_RECOMMENDED');
+    warnings.push('SEGMENT_REJECT_RECOMMENDED');
   }
 
   if (segmentSaleability.reject_segment_candidate === true) {
-    reasons.push('SEGMENT_SALEABILITY_REJECT');
+    warnings.push('SEGMENT_SALEABILITY_REJECT');
   }
 
   if (gpsPointCount > 0 && gpsPointCount < 3) {
@@ -525,7 +525,7 @@ const getAutoReview = (metadata, options = {}) => {
   }
 
   if (darkSceneRisk === 'high' && lowSaleProbability) {
-    reasons.push('DARK_LOW_SALE_PROBABILITY');
+    warnings.push('DARK_LOW_SALE_PROBABILITY');
   } else if (darkSceneRisk === 'high') {
     warnings.push('DARK_SCENE_REVIEW');
   }
@@ -547,7 +547,7 @@ const getAutoReview = (metadata, options = {}) => {
   }
 
   if (qualityScore > 0 && qualityScore < 40) {
-    reasons.push('LOW_QUALITY_SCORE');
+    warnings.push('LOW_QUALITY_SCORE');
   } else if (qualityScore > 0 && qualityScore < 60) {
     warnings.push('QUALITY_SCORE_REVIEW');
   }
@@ -568,12 +568,12 @@ const getAutoReview = (metadata, options = {}) => {
 
   if (uniqueWarnings.length > 0) {
     return {
-      status: 'HOLD',
-      payable: false,
+      status: 'GOOD_PENDING_REVIEW',
+      payable: true,
       review_required: true,
       reasons: [],
       warnings: uniqueWarnings,
-      quality_bucket: 'hold',
+      quality_bucket: 'warning_pass',
     };
   }
 
