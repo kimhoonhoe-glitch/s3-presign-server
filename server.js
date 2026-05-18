@@ -1546,6 +1546,14 @@ res.send(`
   aspect-ratio: 16 / 9;
 }
 
+.inlinePreview.rotate90 {
+  transform: rotate(90deg);
+  transform-origin: center center;
+  width: 124px;
+  height: 220px;
+  margin: -48px 48px;
+}
+
     .inlinePreview.show {
       display: block;
     }
@@ -1697,7 +1705,7 @@ async function load(status) {
       '<td class="col-preview">' +
       '<button class="previewBtn">보기</button> ' +
       '<button class="closePreviewBtn">닫기</button>' +
-      '<video id="' + videoId + '" class="inlinePreview" controls muted></video>' +
+      '<video id="' + videoId + '" class="inlinePreview rotate90" controls muted></video>' +
     '</td>';
 
   tr.querySelector('.previewBtn').onclick = function() {
