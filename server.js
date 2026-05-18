@@ -2011,6 +2011,20 @@ app.get('/admin/review-sessions', async (req, res) => {
             metadata.location?.city ||
             metadata.city ||
             '미수집',
+
+          recruited_by_hunter_id:
+            metadata.hunter?.recruited_by_hunter_id ||
+            metadata.hunter?.recruitedByHunterId ||
+            metadata.hunter_profile?.recruited_by_hunter_id ||
+            metadata.hunter_profile?.recruitedByHunterId ||
+            metadata.recruited_by_hunter_id ||
+            metadata.recruitedByHunterId ||
+            metadata.referrer_hunter_id ||
+            metadata.referrerHunterId ||
+            metadata.referral_code ||
+            metadata.hunter?.referral_code ||
+            metadata.hunter_profile?.referral_code ||
+            null,
         };
 
         const captureDate = extractCaptureDate(metadata, key);
@@ -2663,20 +2677,35 @@ app.get('/admin/payout-summary', async (req, res) => {
           metadata.country ||
           '';
 
-        const city =
+              const city =
           metadata.hunter?.city ||
           metadata.hunter_profile?.city ||
           metadata.location?.city ||
           metadata.city ||
           '';
 
+        const recruitedByHunterId =
+          metadata.hunter?.recruited_by_hunter_id ||
+          metadata.hunter?.recruitedByHunterId ||
+          metadata.hunter_profile?.recruited_by_hunter_id ||
+          metadata.hunter_profile?.recruitedByHunterId ||
+          metadata.recruited_by_hunter_id ||
+          metadata.recruitedByHunterId ||
+          metadata.referrer_hunter_id ||
+          metadata.referrerHunterId ||
+          metadata.referral_code ||
+          metadata.hunter?.referral_code ||
+          metadata.hunter_profile?.referral_code ||
+          '';
+
         if (!hunterMap[hunterId]) {
-          hunterMap[hunterId] = {
+                   hunterMap[hunterId] = {
             hunter_id: hunterId,
             nickname,
             phone,
             country,
             city,
+            recruited_by_hunter_id: recruitedByHunterId,
             latest_sort_key: key,
             capture_earnings: 0,
             recruit_earnings: 0,
@@ -2703,8 +2732,12 @@ app.get('/admin/payout-summary', async (req, res) => {
             hunterMap[hunterId].country = country;
           }
 
-          if (!hunterMap[hunterId].city && city) {
+                   if (!hunterMap[hunterId].city && city) {
             hunterMap[hunterId].city = city;
+          }
+
+          if (!hunterMap[hunterId].recruited_by_hunter_id && recruitedByHunterId) {
+            hunterMap[hunterId].recruited_by_hunter_id = recruitedByHunterId;
           }
 
           if (String(key) > String(hunterMap[hunterId].latest_sort_key || '')) {
@@ -2736,12 +2769,13 @@ app.get('/admin/payout-summary', async (req, res) => {
 
     for (const item of payoutRequests) {
       if (!hunterMap[item.hunter_id]) {
-        hunterMap[item.hunter_id] = {
+          hunterMap[item.hunter_id] = {
           hunter_id: item.hunter_id,
           nickname: '',
           phone: '',
           country: '',
           city: '',
+          recruited_by_hunter_id: '',
           latest_sort_key: item.created_at || '',
           capture_earnings: 0,
           recruit_earnings: 0,
