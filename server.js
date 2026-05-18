@@ -1456,19 +1456,27 @@ res.send(`
       background: #eef2ff;
     }
 
-    .col-no { width: 44px; text-align: center; }
+       .col-no { width: 44px; text-align: center; }
     .col-uploaded { width: 135px; }
     .col-hunter { width: 120px; }
     .col-nickname { width: 95px; }
+    .col-referrer { width: 130px; }
     .col-phone { width: 125px; }
     .col-country { width: 65px; }
     .col-city { width: 85px; }
     .col-duration { width: 70px; text-align: right; }
-    .col-status { width: 80px; }
+
+    .col-status {
+      width: 155px;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.3;
+    }
+
     .col-usd { width: 70px; text-align: right; }
     .col-reject { width: 290px; }
     .col-warning { width: 240px; }
-    .col-preview { width: 320px; }
+    .col-preview { width: 460px; }
 
     .reason {
       white-space: normal;
@@ -1524,13 +1532,14 @@ res.send(`
       background: #374151;
    }
 
-    .inlinePreview {
+       .inlinePreview {
       display: none;
-      width: 300px;
-      height: 170px;
+      width: 440px;
+      height: 248px;
       background: #000;
       border-radius: 8px;
       object-fit: contain;
+      aspect-ratio: 16 / 9;
     }
 
     .inlinePreview.show {
@@ -1572,6 +1581,7 @@ res.send(`
           <th class="col-uploaded">Uploaded At</th>
           <th class="col-hunter">Hunter</th>
           <th class="col-nickname">Nickname</th>
+          <th class="col-referrer">Referrer</th>
           <th class="col-phone">Phone</th>
           <th class="col-country">Country</th>
           <th class="col-city">City</th>
@@ -1646,7 +1656,14 @@ async function load(status) {
     const no = index + 1;
     const uploadedAt = extractUploadedAt(item);
     const hunterId = safeText(item.hunter_id || hunter.hunter_id);
-    const nickname = safeText(hunter.nickname);
+       const nickname = safeText(hunter.nickname);
+    const referrer = safeText(
+      hunter.recruited_by_hunter_id ||
+      hunter.recruitedByHunterId ||
+      hunter.referrer_hunter_id ||
+      hunter.referrerHunterId ||
+      '-'
+    );
     const phone = safeText(hunter.phone);
     const country = safeText(hunter.country);
     const city = safeText(hunter.city);
@@ -1664,6 +1681,7 @@ async function load(status) {
       '<td class="col-uploaded" title="' + uploadedAt + '">' + uploadedAt + '</td>' +
       '<td class="col-hunter" title="' + hunterId + '">' + hunterId + '</td>' +
       '<td class="col-nickname" title="' + nickname + '">' + nickname + '</td>' +
+      '<td class="col-referrer" title="' + referrer + '">' + referrer + '</td>' +
       '<td class="col-phone" title="' + phone + '">' + phone + '</td>' +
       '<td class="col-country" title="' + country + '">' + country + '</td>' +
       '<td class="col-city" title="' + city + '">' + city + '</td>' +
@@ -1832,6 +1850,11 @@ app.get('/admin/review-uploads', async (req, res) => {
             metadata.hunter_profile?.recruitedByHunterId ||
             metadata.recruited_by_hunter_id ||
             metadata.recruitedByHunterId ||
+            metadata.referrer_hunter_id ||
+            metadata.referrerHunterId ||
+            metadata.referral_code ||
+            metadata.hunter?.referral_code ||
+            metadata.hunter_profile?.referral_code ||
             null,
 
           leader_hunter_id:
