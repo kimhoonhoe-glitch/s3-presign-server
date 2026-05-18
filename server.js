@@ -1547,7 +1547,7 @@ res.send(`
 }
 
 .inlinePreview.rotate90 {
-  transform: rotate(90deg);
+  transform: rotate(-90deg);
   transform-origin: center center;
   width: 124px;
   height: 220px;
