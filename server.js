@@ -592,6 +592,146 @@ const calculatePayableEarning = (metadata, review) => {
   return calculateEstimatedEarning(metadata);
 };
 
+const extractCaptureSortTime = (metadata, key) => {
+  const raw =
+    metadata.recording_started_at ||
+    metadata.recording_started_at_utc ||
+    metadata.recordingStartTime ||
+    metadata.created_at ||
+    metadata.created_at_iso ||
+    metadata.saved_at_utc ||
+    metadata.capture_started_at ||
+    metadata.session?.recording_started_at ||
+    metadata.session?.recording_started_at_utc ||
+    '';
+
+  if (typeof raw === 'string' && raw) {
+    const t = new Date(raw).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+
+  const match = String(key || '').match(/capture_(\d{8})T(\d{6})Z/);
+  if (match) {
+    const y = match[1].slice(0, 4);
+    const m = match[1].slice(4, 6);
+    const d = match[1].slice(6, 8);
+    const hh = match[2].slice(0, 2);
+    const mm = match[2].slice(2, 4);
+    const ss = match[2].slice(4, 6);
+    return new Date(`${y}-${m}-${d}T${hh}:${mm}:${ss}Z`).getTime();
+  }
+
+  return 0;
+};
+
+const buildSessionId = ({ hunterId, date, startedAtMs }) => {
+  const d = startedAtMs ? new Date(startedAtMs) : new Date();
+  const stamp = d.toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
+
+  return `SESSION-${hunterId}-${date}-${stamp}`;
+};
+
+const groupReviewItemsIntoSessions = (items, gapMinutes = 5) => {
+  const sorted = [...items].sort((a, b) => {
+    if (a.hunter_id !== b.hunter_id) {
+      return String(a.hunter_id).localeCompare(String(b.hunter_id));
+    }
+
+    if (a.capture_date !== b.capture_date) {
+      return String(a.capture_date || '').localeCompare(String(b.capture_date || ''));
+    }
+
+    return Number(a.sort_time_ms || 0) - Number(b.sort_time_ms || 0);
+  });
+
+  const sessions = [];
+  let current = null;
+  const maxGapMs = gapMinutes * 60 * 1000;
+
+  for (const item of sorted) {
+    const startedAtMs = Number(item.sort_time_ms || 0);
+    const itemDurationMs = Number(item.duration_minutes || 0) * 60 * 1000;
+
+    const shouldStartNew =
+      !current ||
+      current.hunter_id !== item.hunter_id ||
+      current.capture_date !== item.capture_date ||
+      (
+        current.last_end_ms > 0 &&
+        startedAtMs > 0 &&
+        startedAtMs - current.last_end_ms > maxGapMs
+      );
+
+    if (shouldStartNew) {
+      current = {
+        session_id: buildSessionId({
+          hunterId: item.hunter_id,
+          date: item.capture_date || 'unknown-date',
+          startedAtMs,
+        }),
+        hunter_id: item.hunter_id,
+        hunter: item.hunter,
+        capture_date: item.capture_date,
+        started_at_ms: startedAtMs,
+        ended_at_ms: startedAtMs + itemDurationMs,
+        last_end_ms: startedAtMs + itemDurationMs,
+        part_count: 0,
+        total_duration_minutes: 0,
+        payable_duration_minutes: 0,
+        estimated_earning_usd: 0,
+        reject_reasons: [],
+        review_warnings: [],
+        parts: [],
+      };
+
+      sessions.push(current);
+    }
+
+    current.parts.push({
+      ...item,
+      part_index: current.parts.length + 1,
+    });
+
+    current.part_count += 1;
+    current.total_duration_minutes += Number(item.duration_minutes || 0);
+
+    if (item.payable) {
+      current.payable_duration_minutes += Number(item.duration_minutes || 0);
+      current.estimated_earning_usd += Number(item.estimated_earning_usd || 0);
+    }
+
+    current.reject_reasons.push(...(item.reject_reasons || []));
+    current.review_warnings.push(...(item.review_warnings || []));
+
+    const endMs = startedAtMs + itemDurationMs;
+    if (endMs > current.ended_at_ms) current.ended_at_ms = endMs;
+    if (endMs > current.last_end_ms) current.last_end_ms = endMs;
+  }
+
+  return sessions.map((session) => {
+    const hasReject = session.parts.some((part) => part.status === 'REJECT');
+    const hasPayable = session.parts.some((part) => part.payable);
+
+    let status = 'GOOD_PENDING_REVIEW';
+    if (!hasPayable && hasReject) status = 'REJECT';
+    else if (hasReject && hasPayable) status = 'PARTIAL_PASS';
+
+    return {
+      ...session,
+      status,
+      total_duration_minutes: Number(session.total_duration_minutes.toFixed(2)),
+      payable_duration_minutes: Number(session.payable_duration_minutes.toFixed(2)),
+      estimated_earning_usd: Number(session.estimated_earning_usd.toFixed(2)),
+      reject_reasons: [...new Set(session.reject_reasons)],
+      review_warnings: [...new Set(session.review_warnings)],
+      started_at: session.started_at_ms ? new Date(session.started_at_ms).toISOString() : '',
+      ended_at: session.ended_at_ms ? new Date(session.ended_at_ms).toISOString() : '',
+    };
+  }).sort((a, b) => Number(b.started_at_ms || 0) - Number(a.started_at_ms || 0));
+};
+
 const getTierByEarnings = (totalEarnings) => {
   if (totalEarnings >= 50) return 'DIAMOND HUNTER';
   if (totalEarnings >= 20) return 'GOLD HUNTER';
@@ -1486,8 +1626,8 @@ async function load(status) {
   rows.innerHTML = '';
 
   const url = status
-    ? '/admin/review-uploads?limit=100&status=' + encodeURIComponent(status)
-    : '/admin/review-uploads?limit=100';
+  ? '/admin/review-sessions?limit=100&status=' + encodeURIComponent(status)
+  : '/admin/review-sessions?limit=100';
 
   const res = await fetch(url);
   const data = await res.json();
@@ -1510,12 +1650,14 @@ async function load(status) {
     const phone = safeText(hunter.phone);
     const country = safeText(hunter.country);
     const city = safeText(hunter.city);
-    const duration = Number(item.duration_minutes || 0).toFixed(2);
-    const statusText = safeText(item.status);
-    const usd = Number(item.estimated_earning_usd || 0).toFixed(2);
-    const rejectText = safeText((item.reject_reasons || []).join(', '));
-    const warningText = safeText((item.review_warnings || []).join(', '));
-    const videoId = 'preview_' + index;
+   const duration = Number(item.total_duration_minutes || 0).toFixed(2);
+   const statusText = safeText(item.status);
+   const usd = Number(item.estimated_earning_usd || 0).toFixed(2);
+   const rejectText = safeText((item.reject_reasons || []).join(', '));
+   const warningText = safeText((item.review_warnings || []).join(', '));
+   const partCount = Number(item.part_count || 0);
+   const firstPart = (item.parts || [])[0] || {};
+   const videoId = 'preview_' + index;
 
     tr.innerHTML =
       '<td class="col-no">' + no + '</td>' +
@@ -1525,7 +1667,7 @@ async function load(status) {
       '<td class="col-phone" title="' + phone + '">' + phone + '</td>' +
       '<td class="col-country" title="' + country + '">' + country + '</td>' +
       '<td class="col-city" title="' + city + '">' + city + '</td>' +
-      '<td class="col-duration">' + duration + '</td>' +
+     '<td class="col-duration" title="Parts: ' + partCount + '">' + duration + '</td>' +
       '<td class="col-status ' + getStatusClass(statusText) + '">' + statusText + '</td>' +
       '<td class="col-usd">$' + usd + '</td>' +
       '<td class="col-reject"><div class="reason" title="' + rejectText + '">' + rejectText + '</div></td>' +
@@ -1537,7 +1679,7 @@ async function load(status) {
     '</td>';
 
   tr.querySelector('.previewBtn').onclick = function() {
-  previewVideo(videoId, item.video_key, tr);
+  previewVideo(videoId, firstPart.video_key, tr);
 };
 
 tr.querySelector('.closePreviewBtn').onclick = function() {
@@ -1712,15 +1854,16 @@ app.get('/admin/review-uploads', async (req, res) => {
 
         const estimatedEarning = calculatePayableEarning(metadata, review);
 
-        const item = {
-          s3_key: key,
-          s3_prefix: prefix,
+       const item = {
+       s3_key: key,
+       s3_prefix: prefix,
 
-          hunter_id: hunterId,
-          hunter: hunterProfile,
+       hunter_id: hunterId,
+       hunter: hunterProfile,
 
-          capture_date: captureDate,
-          duration_minutes: Number(durationMinutes.toFixed(2)),
+       capture_date: captureDate,
+       sort_time_ms: extractCaptureSortTime(metadata, key),
+       duration_minutes: Number(durationMinutes.toFixed(2)),
 
           upload_complete: uploadComplete,
           missing_files: uploadStatus.missing,
@@ -1764,6 +1907,134 @@ app.get('/admin/review-uploads', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to load review uploads',
+    });
+  }
+});
+
+app.get('/admin/review-sessions', async (req, res) => {
+  try {
+    const hunterFilter = req.query.hunter_id || req.query.hunterId || null;
+    const statusFilter = req.query.status || null;
+    const limit = Math.min(Number(req.query.limit || 200), 1000);
+
+    const keys = await listCaptureMetadataKeys();
+    const items = [];
+
+    for (const key of keys) {
+      try {
+        const prefix = getCapturePrefixFromMetadataKey(key);
+        const uploadStatus = await getUploadFileStatus(prefix);
+        const uploadComplete = uploadStatus.strictComplete;
+
+        const metadata = await readJsonFromS3(key);
+        const hunterId = extractHunterId(metadata, key);
+
+        if (!isSafeId(hunterId)) continue;
+        if (hunterFilter && hunterId !== hunterFilter) continue;
+
+        const hunterProfile = {
+          hunter_id: hunterId,
+
+          nickname:
+            metadata.hunter?.nickname ||
+            metadata.hunter_profile?.nickname ||
+            metadata.nickname ||
+            metadata.public_hunter_code ||
+            metadata.hunter?.public_hunter_code ||
+            metadata.hunter_profile?.public_hunter_code ||
+            '미등록',
+
+          phone:
+            metadata.hunter?.phone ||
+            metadata.hunter?.phone_number ||
+            metadata.hunter?.phoneNumber ||
+            metadata.hunter_profile?.phone ||
+            metadata.hunter_profile?.phone_number ||
+            metadata.hunter_profile?.phoneNumber ||
+            metadata.phone ||
+            metadata.phone_number ||
+            metadata.phoneNumber ||
+            '미수집',
+
+          country:
+            metadata.hunter?.country ||
+            metadata.hunter_profile?.country ||
+            metadata.location?.country ||
+            metadata.country ||
+            '미수집',
+
+          city:
+            metadata.hunter?.city ||
+            metadata.hunter_profile?.city ||
+            metadata.location?.city ||
+            metadata.city ||
+            '미수집',
+        };
+
+        const captureDate = extractCaptureDate(metadata, key);
+        const durationMinutes = getDurationMinutes(metadata);
+
+        const review = getAutoReview(metadata, {
+          uploadComplete,
+          uploadMissing: uploadStatus.missing,
+        });
+
+        const estimatedEarning = calculatePayableEarning(metadata, review);
+
+        items.push({
+          s3_key: key,
+          s3_prefix: prefix,
+
+          hunter_id: hunterId,
+          hunter: hunterProfile,
+
+          capture_date: captureDate,
+          sort_time_ms: extractCaptureSortTime(metadata, key),
+          duration_minutes: Number(durationMinutes.toFixed(2)),
+
+          upload_complete: uploadComplete,
+          missing_files: uploadStatus.missing,
+
+          status: review.status,
+          payable: review.payable,
+          reject_reasons: review.reasons,
+          review_warnings: review.warnings,
+          quality_bucket: review.quality_bucket,
+
+          estimated_earning_usd: estimatedEarning,
+
+          video_key: uploadStatus.keys.video,
+          capture_metadata_key: uploadStatus.keys.captureMetadata,
+          imu_metadata_key: uploadStatus.keys.imuMetadata,
+        });
+      } catch (err) {
+        console.error('ADMIN_REVIEW_SESSION_ITEM_ERROR', err);
+      }
+    }
+
+    let sessions = groupReviewItemsIntoSessions(items, 5);
+
+    if (statusFilter) {
+      sessions = sessions.filter((session) => session.status === statusFilter);
+    }
+
+    return res.json({
+      success: true,
+      total: sessions.length,
+      hunter_filter: hunterFilter,
+      status_filter: statusFilter,
+      grouping: {
+        mode: 'server_time_gap',
+        gap_minutes: 5,
+        note: 'Raw files are not moved or merged. Sessions are logical groups only.',
+      },
+      items: sessions.slice(0, limit),
+    });
+  } catch (error) {
+    console.error('ADMIN_REVIEW_SESSIONS_ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load review sessions',
     });
   }
 });
