@@ -1874,6 +1874,9 @@ app.get('/admin/review-uploads', async (req, res) => {
             metadata.referral_code ||
             metadata.hunter?.referral_code ||
             metadata.hunter_profile?.referral_code ||
+            metadata.referral_code_input ||
+            metadata.hunter?.referral_code_input ||
+            metadata.hunter_profile?.referral_code_input ||
             null,
 
           leader_hunter_id:
@@ -2024,6 +2027,9 @@ app.get('/admin/review-sessions', async (req, res) => {
             metadata.referral_code ||
             metadata.hunter?.referral_code ||
             metadata.hunter_profile?.referral_code ||
+            metadata.referral_code_input ||
+            metadata.hunter?.referral_code_input ||
+            metadata.hunter_profile?.referral_code_input ||
             null,
         };
 
@@ -2684,7 +2690,7 @@ app.get('/admin/payout-summary', async (req, res) => {
           metadata.city ||
           '';
 
-        const recruitedByHunterId =
+          const recruitedByHunterId =
           metadata.hunter?.recruited_by_hunter_id ||
           metadata.hunter?.recruitedByHunterId ||
           metadata.hunter_profile?.recruited_by_hunter_id ||
@@ -2696,6 +2702,9 @@ app.get('/admin/payout-summary', async (req, res) => {
           metadata.referral_code ||
           metadata.hunter?.referral_code ||
           metadata.hunter_profile?.referral_code ||
+          metadata.referral_code_input ||
+          metadata.hunter?.referral_code_input ||
+          metadata.hunter_profile?.referral_code_input ||
           '';
 
         if (!hunterMap[hunterId]) {
