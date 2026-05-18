@@ -1713,6 +1713,13 @@ tr.querySelector('.closePreviewBtn').onclick = function() {
 }
 
 async function previewVideo(videoId, videoKey, row) {
+
+  document.querySelectorAll('.inlinePreview').forEach(function(v) {
+    if (v.id !== videoId) {
+      v.pause();
+      v.classList.remove('show');
+    }
+  });
   if (!videoKey) {
     alert('video_key 없음');
     return;
