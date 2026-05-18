@@ -1536,15 +1536,15 @@ res.send(`
       background: #374151;
    }
 
-        .inlinePreview {
-      display: none;
-      width: 220px;
-      height: 124px;
-      background: #000;
-      border-radius: 8px;
-      object-fit: cover;
-      aspect-ratio: 16 / 9;
-    }
+      .inlinePreview {
+  display: none;
+  width: 220px;
+  height: 124px;
+  background: #000;
+  border-radius: 8px;
+  object-fit: contain;
+  aspect-ratio: 16 / 9;
+}
 
     .inlinePreview.show {
       display: block;
