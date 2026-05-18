@@ -1419,9 +1419,9 @@ res.send(`
       box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     }
 
-    table {
+      table {
       width: 100%;
-      min-width: 1520px;
+      min-width: 1180px;
       border-collapse: collapse;
       table-layout: fixed;
     }
@@ -1438,14 +1438,15 @@ res.send(`
       z-index: 2;
     }
 
-    td {
+        td {
       border-bottom: 1px solid #e5e7eb;
-      padding: 8px;
+      padding: 5px 4px;
       vertical-align: top;
       background: #fff;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      font-size: 11px;
     }
 
     tr:hover td {
@@ -1456,27 +1457,28 @@ res.send(`
       background: #eef2ff;
     }
 
-       .col-no { width: 44px; text-align: center; }
-    .col-uploaded { width: 135px; }
-    .col-hunter { width: 120px; }
-    .col-nickname { width: 95px; }
-    .col-referrer { width: 130px; }
-    .col-phone { width: 125px; }
-    .col-country { width: 65px; }
-    .col-city { width: 85px; }
-    .col-duration { width: 70px; text-align: right; }
+     .col-no { width: 36px; text-align: center; }
+    .col-uploaded { width: 105px; }
+    .col-hunter { width: 95px; }
+    .col-nickname { width: 75px; }
+    .col-referrer { width: 95px; }
+    .col-phone { width: 105px; }
+    .col-country { width: 45px; }
+    .col-city { width: 60px; }
+    .col-duration { width: 48px; text-align: right; }
 
     .col-status {
-      width: 155px;
+      width: 105px;
       white-space: normal;
       word-break: break-word;
-      line-height: 1.3;
+      line-height: 1.2;
+      font-size: 11px;
     }
 
-    .col-usd { width: 70px; text-align: right; }
-    .col-reject { width: 290px; }
-    .col-warning { width: 240px; }
-    .col-preview { width: 460px; }
+    .col-usd { width: 55px; text-align: right; }
+    .col-reject { width: 145px; }
+    .col-warning { width: 145px; }
+    .col-preview { width: 235px; }
 
     .reason {
       white-space: normal;
@@ -1502,43 +1504,45 @@ res.send(`
       font-weight: 800;
     }
 
-    .previewBtn {
+     .previewBtn {
       border: 0;
       background: #2563eb;
       color: white;
-      padding: 7px 12px;
-      border-radius: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
       cursor: pointer;
       font-weight: 800;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
+      font-size: 11px;
     }
 
     .previewBtn:hover {
       background: #1d4ed8;
     }
 
-   .closePreviewBtn {
+     .closePreviewBtn {
      border: 0;
      background: #6b7280;
      color: white;
-     padding: 7px 12px;
-     border-radius: 8px;
+     padding: 4px 8px;
+     border-radius: 6px;
      cursor: pointer;
      font-weight: 800;
-     margin-bottom: 8px;
+     margin-bottom: 4px;
+     font-size: 11px;
    }
 
     .closePreviewBtn:hover {
       background: #374151;
    }
 
-       .inlinePreview {
+        .inlinePreview {
       display: none;
-      width: 440px;
-      height: 248px;
+      width: 220px;
+      height: 124px;
       background: #000;
       border-radius: 8px;
-      object-fit: contain;
+      object-fit: cover;
       aspect-ratio: 16 / 9;
     }
 
