@@ -1555,8 +1555,59 @@ app.get('/admin/review', (req, res) => {
 }
 
     .inlinePreview.show {
-      display: block;
-    }
+  display: block;
+}
+
+.partsRow td {
+  background: #f8fafc;
+  white-space: normal;
+  padding: 10px;
+}
+
+.partsBox {
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.partItem {
+  display: grid;
+  grid-template-columns: 55px 80px 90px 1fr 170px;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 6px 0;
+  font-size: 11px;
+}
+
+.partItem:last-child {
+  border-bottom: 0;
+}
+
+.partBadge {
+  font-weight: 900;
+}
+
+.partReject {
+  color: #dc2626;
+}
+
+.partPass {
+  color: #059669;
+}
+
+.partsBtn {
+  border: 0;
+  background: #7c3aed;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 800;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
   </style>
 </head>
 <body>
@@ -1602,7 +1653,7 @@ app.get('/admin/review', (req, res) => {
           <th class="col-usd">USD</th>
           <th class="col-reject">Reject</th>
           <th class="col-warning">Warning</th>
-          <th class="col-preview">Preview</th>
+          <th class="col-preview">Preview / Parts</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -1685,8 +1736,10 @@ async function load(status) {
    const rejectText = safeText((item.reject_reasons || []).join(', '));
    const warningText = safeText((item.review_warnings || []).join(', '));
    const partCount = Number(item.part_count || 0);
-   const firstPart = (item.parts || [])[0] || {};
+   const parts = item.parts || [];
+   const firstPart = parts[0] || {};
    const videoId = 'preview_' + index;
+   const partsId = 'parts_' + index;
 
     tr.innerHTML =
       '<td class="col-no">' + no + '</td>' +
@@ -1704,7 +1757,8 @@ async function load(status) {
       '<td class="col-warning"><div class="reason" title="' + warningText + '">' + warningText + '</div></td>' +
       '<td class="col-preview">' +
       '<button class="previewBtn">보기</button> ' +
-      '<button class="closePreviewBtn">닫기</button>' +
+      '<button class="closePreviewBtn">닫기</button> ' +
+      '<button class="partsBtn">조각 ' + partCount + '개</button>' +
       '<video id="' + videoId + '" class="inlinePreview rotate90" controls muted></video>' +
     '</td>';
 
@@ -1716,7 +1770,11 @@ tr.querySelector('.closePreviewBtn').onclick = function() {
   closePreview(videoId, tr);
 };
 
-    rows.appendChild(tr);
+tr.querySelector('.partsBtn').onclick = function() {
+  togglePartsRow(partsId, tr, parts);
+};
+
+rows.appendChild(tr);
   });
 }
 
@@ -1773,6 +1831,49 @@ function closePreview(videoId, row) {
   if (selectedRow === row) {
     selectedRow = null;
   }
+}
+
+function togglePartsRow(partsId, row, parts) {
+  const existing = document.getElementById(partsId);
+
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const detailRow = document.createElement('tr');
+  detailRow.id = partsId;
+  detailRow.className = 'partsRow';
+
+  let html = '<td colspan="14"><div class="partsBox">';
+  html += '<b>Session Parts</b>';
+
+  if (!parts || !parts.length) {
+    html += '<div class="muted">조각 정보 없음</div>';
+  } else {
+    parts.forEach(function(part) {
+      const status = safeText(part.status || '');
+      const badgeClass = status === 'REJECT' ? 'partReject' : 'partPass';
+      const duration = Number(part.duration_minutes || 0).toFixed(2);
+      const reject = safeText((part.reject_reasons || []).join(', '));
+      const warning = safeText((part.review_warnings || []).join(', '));
+
+      html +=
+        '<div class="partItem">' +
+          '<div>#' + Number(part.part_index || 0) + '</div>' +
+          '<div>' + duration + ' min</div>' +
+          '<div class="partBadge ' + badgeClass + '">' + status + '</div>' +
+          '<div title="' + reject + '">' + (reject || warning || '-') + '</div>' +
+          '<div><button class="previewBtn" onclick="previewVideo(\\'inline_part_' + partsId + '_' + part.part_index + '\\', \\'' + part.video_key + '\\', this.closest(\\'tr\\'))">보기</button></div>' +
+        '</div>' +
+        '<video id="inline_part_' + partsId + '_' + part.part_index + '" class="inlinePreview rotate90" controls muted></video>';
+    });
+  }
+
+  html += '</div></td>';
+
+  detailRow.innerHTML = html;
+  row.insertAdjacentElement('afterend', detailRow);
 }
 
 load('');
