@@ -1427,27 +1427,28 @@ app.get('/admin/review', (req, res) => {
     }
 
     th {
-      position: sticky;
-      top: 0;
-      background: #111827;
-      color: #fff;
-      padding: 9px 8px;
-      text-align: left;
-      font-size: 12px;
-      white-space: nowrap;
-      z-index: 2;
-    }
+  position: sticky;
+  top: 0;
+  background: #111827;
+  color: #fff;
+  padding: 9px 8px;
+  text-align: right;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 2;
+}
 
-        td {
-      border-bottom: 1px solid #e5e7eb;
-      padding: 5px 4px;
-      vertical-align: top;
-      background: #fff;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-size: 11px;
-    }
+      td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 5px 4px;
+  vertical-align: top;
+  background: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  text-align: right;
+}
 
     tr:hover td {
       background: #f9fafb;
@@ -1573,11 +1574,11 @@ app.get('/admin/review', (req, res) => {
 
 .partItem {
   display: grid;
-  grid-template-columns: 55px 80px 90px 1fr 170px;
-  gap: 8px;
-  align-items: center;
+  grid-template-columns: 40px 70px 150px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
   border-bottom: 1px solid #e5e7eb;
-  padding: 6px 0;
+  padding: 8px 0;
   font-size: 11px;
 }
 
@@ -1595,6 +1596,20 @@ app.get('/admin/review', (req, res) => {
 
 .partPass {
   color: #059669;
+}
+
+.partBadge {
+  font-weight: 900;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.partReason {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
+  color: #111827;
 }
 
 .partsBtn {
@@ -1622,6 +1637,20 @@ app.get('/admin/review', (req, res) => {
   <button onclick="load('APPROVE')">APPROVE</button>
   <button onclick="load('REJECT')">REJECT</button>
   <button onclick="load('HOLD')">HOLD</button>
+
+<input
+  id="quickFilter"
+  placeholder="Hunter / Nickname / Referrer search"
+  oninput="applyQuickFilter()"
+  style="
+    margin-left:12px;
+    padding:7px 10px;
+    border:1px solid #d1d5db;
+    border-radius:8px;
+    min-width:260px;
+    font-weight:700;
+  "
+/>
 
   <button
     onclick="location.href='/admin/payouts'"
@@ -1710,7 +1739,18 @@ async function load(status) {
     return;
   }
 
-  summary.innerText = 'Total: ' + data.total + ' / Filter: ' + (status || 'ALL');
+  const totalPayableMinutes = (data.items || []).reduce(function(sum, item) {
+  return sum + Number(item.payable_duration_minutes || 0);
+}, 0);
+
+const totalPayableHours = totalPayableMinutes / 60;
+
+summary.innerHTML =
+  'Total: ' + data.total +
+  ' / Filter: ' + (status || 'ALL') +
+  ' / <span style="color:#dc2626; font-weight:900;">Sellable: ' +
+  totalPayableHours.toFixed(2) +
+  ' hours</span>';
 
   (data.items || []).forEach(function(item, index) {
     const hunter = item.hunter || {};
@@ -1775,6 +1815,7 @@ tr.querySelector('.partsBtn').onclick = function() {
 };
 
 rows.appendChild(tr);
+applyQuickFilter();
   });
 }
 
@@ -1812,6 +1853,26 @@ async function previewVideo(videoId, videoKey, row) {
 
   video.src = data.url;
   video.classList.add('show');
+}
+
+function applyQuickFilter() {
+  const q = safeText(document.getElementById('quickFilter')?.value || '')
+    .toLowerCase()
+    .trim();
+
+  document.querySelectorAll('#rows tr').forEach(function(row) {
+    if (row.classList.contains('partsRow')) {
+      return;
+    }
+
+    const text = row.innerText.toLowerCase();
+    row.style.display = !q || text.includes(q) ? '' : 'none';
+
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains('partsRow') && row.style.display === 'none') {
+      next.style.display = 'none';
+    }
+  });
 }
 
 function closePreview(videoId, row) {
@@ -1863,7 +1924,8 @@ function togglePartsRow(partsId, row, parts) {
           '<div>#' + Number(part.part_index || 0) + '</div>' +
           '<div>' + duration + ' min</div>' +
           '<div class="partBadge ' + badgeClass + '">' + status + '</div>' +
-          '<div title="' + reject + '">' + (reject || warning || '-') + '</div>' +
+          '<div class="partReason" title="' + reject + '">' + (reject || warning || '-') +
+          '</div>' +
           '<div><button class="previewBtn" onclick="previewVideo(\\'inline_part_' + partsId + '_' + part.part_index + '\\', \\'' + part.video_key + '\\', this.closest(\\'tr\\'))">보기</button></div>' +
         '</div>' +
         '<video id="inline_part_' + partsId + '_' + part.part_index + '" class="inlinePreview rotate90" controls muted></video>';
