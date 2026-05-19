@@ -22,7 +22,7 @@ const app = express();
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'HEAD', 'OPTIONS'],
- allowedHeaders: ['Content-Type', 'Authorization', 'x-app-version'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-app-version'],
 }));
 
 app.use(express.json({ limit: '2mb' }));
@@ -1025,19 +1025,19 @@ app.get('/admin/payouts', (req, res) => {
     <table>
    <thead>
   <tr>
-    <th>No</th>
-    <th>Upload ID</th>
-    <th>Hunter</th>
-    <th>Nickname</th>
-    <th>Phone</th>
-    <th>Country</th>
-    <th>City</th>
-    <th>Time</th>
-    <th>Status</th>
-    <th>Reject</th>
-    <th>Hold</th>
-    <th>Available</th>
-  </tr>
+  <th>No</th>
+  <th>Hunter ID</th>
+  <th>Nickname</th>
+  <th>Referrer</th>
+  <th>Phone</th>
+  <th>Country</th>
+  <th>Total Min</th>
+  <th>Payable Min</th>
+  <th>Uploads</th>
+  <th>Reject</th>
+  <th>Total</th>
+  <th>Available</th>
+</tr>
 </thead>
 <tbody id="rows"></tbody>
     </table>
@@ -1163,7 +1163,7 @@ async function loadHunters() {
       const latestRequest = hunterRequests[0] || {};
       const tr = document.createElement('tr');
 
-      tr.innerHTML =
+           tr.innerHTML =
         '<td class="col-no">' + (index + 1) + '</td>' +
 
         '<td class="col-hunter"><button class="linkBtn">' +
@@ -1174,6 +1174,10 @@ async function loadHunters() {
           safeText(hunter.nickname || '-') +
         '</button></td>' +
 
+        '<td class="col-hunter" title="' + safeText(hunter.recruited_by_hunter_id || '-') + '">' +
+          safeText(hunter.recruited_by_hunter_id || '-') +
+        '</td>' +
+
         '<td class="col-phone" title="' + safeText(hunter.phone) + '">' +
           safeText(hunter.phone || '-') +
         '</td>' +
@@ -1183,31 +1187,27 @@ async function loadHunters() {
         '</td>' +
 
         '<td class="col-amount">' +
+          Number(hunter.total_minutes || 0).toFixed(2) +
+        '</td>' +
+
+        '<td class="col-amount">' +
+          Number(hunter.payable_minutes || 0).toFixed(2) +
+        '</td>' +
+
+        '<td class="col-amount">' +
+          Number(hunter.total_uploads || 0) +
+        '</td>' +
+
+        '<td class="col-amount">' +
+          Number(hunter.rejected_uploads || 0) +
+        '</td>' +
+
+        '<td class="col-amount">' +
           money(hunter.total_earnings || 0) +
         '</td>' +
 
         '<td class="col-amount">' +
           money(hunter.available_balance || 0) +
-        '</td>' +
-
-        '<td class="col-amount">' +
-          money(latestRequest.amount || 0) +
-        '</td>' +
-
-        '<td class="col-date">' +
-          formatDate(latestRequest.created_at || '') +
-        '</td>' +
-
-        '<td class="col-status ' + statusClass(safeText(latestRequest.status || 'NONE').toUpperCase()) + '">' +
-          safeText(latestRequest.status || 'NONE') +
-        '</td>' +
-
-       '<td class="col-action">' +
-        getPayoutButton(latestRequest) +
-       '</td>' +
-
-        '<td class="col-date">' +
-          formatDate(latestRequest.paid_at || '') +
         '</td>';
 
       const buttons = tr.querySelectorAll('.linkBtn');
@@ -1359,7 +1359,7 @@ app.get('/api/v1/app-version-policy', (req, res) => {
 });
 
 app.get('/admin/review', (req, res) => {
-res.send(`
+  res.send(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -1899,16 +1899,16 @@ app.get('/admin/review-uploads', async (req, res) => {
 
         const estimatedEarning = calculatePayableEarning(metadata, review);
 
-       const item = {
-       s3_key: key,
-       s3_prefix: prefix,
+        const item = {
+          s3_key: key,
+          s3_prefix: prefix,
 
-       hunter_id: hunterId,
-       hunter: hunterProfile,
+          hunter_id: hunterId,
+          hunter: hunterProfile,
 
-       capture_date: captureDate,
-       sort_time_ms: extractCaptureSortTime(metadata, key),
-       duration_minutes: Number(durationMinutes.toFixed(2)),
+          capture_date: captureDate,
+          sort_time_ms: extractCaptureSortTime(metadata, key),
+          duration_minutes: Number(durationMinutes.toFixed(2)),
 
           upload_complete: uploadComplete,
           missing_files: uploadStatus.missing,
@@ -2683,14 +2683,14 @@ app.get('/admin/payout-summary', async (req, res) => {
           metadata.country ||
           '';
 
-              const city =
+        const city =
           metadata.hunter?.city ||
           metadata.hunter_profile?.city ||
           metadata.location?.city ||
           metadata.city ||
           '';
 
-          const recruitedByHunterId =
+        const recruitedByHunterId =
           metadata.hunter?.recruited_by_hunter_id ||
           metadata.hunter?.recruitedByHunterId ||
           metadata.hunter_profile?.recruited_by_hunter_id ||
@@ -2708,7 +2708,7 @@ app.get('/admin/payout-summary', async (req, res) => {
           '';
 
         if (!hunterMap[hunterId]) {
-                   hunterMap[hunterId] = {
+          hunterMap[hunterId] = {
             hunter_id: hunterId,
             nickname,
             phone,
@@ -2724,6 +2724,8 @@ app.get('/admin/payout-summary', async (req, res) => {
             pending_payout: 0,
             available_balance: 0,
             total_uploads: 0,
+            total_minutes: 0,
+            payable_minutes: 0,
             payable_uploads: 0,
             rejected_uploads: 0,
             hold_uploads: 0,
@@ -2741,7 +2743,7 @@ app.get('/admin/payout-summary', async (req, res) => {
             hunterMap[hunterId].country = country;
           }
 
-                   if (!hunterMap[hunterId].city && city) {
+          if (!hunterMap[hunterId].city && city) {
             hunterMap[hunterId].city = city;
           }
 
@@ -2760,8 +2762,10 @@ app.get('/admin/payout-summary', async (req, res) => {
         });
 
         const estimated = calculatePayableEarning(metadata, review);
+        const durationMinutes = getDurationMinutes(metadata);
 
         hunterMap[hunterId].total_uploads += 1;
+        hunterMap[hunterId].total_minutes += durationMinutes;
 
         if (review.status === 'REJECT') {
           hunterMap[hunterId].rejected_uploads += 1;
@@ -2769,6 +2773,7 @@ app.get('/admin/payout-summary', async (req, res) => {
           hunterMap[hunterId].hold_uploads += 1;
         } else if (review.payable) {
           hunterMap[hunterId].payable_uploads += 1;
+          hunterMap[hunterId].payable_minutes += durationMinutes;
           hunterMap[hunterId].capture_earnings += estimated;
         }
       } catch (itemError) {
@@ -2778,7 +2783,7 @@ app.get('/admin/payout-summary', async (req, res) => {
 
     for (const item of payoutRequests) {
       if (!hunterMap[item.hunter_id]) {
-          hunterMap[item.hunter_id] = {
+        hunterMap[item.hunter_id] = {
           hunter_id: item.hunter_id,
           nickname: '',
           phone: '',
@@ -2794,6 +2799,8 @@ app.get('/admin/payout-summary', async (req, res) => {
           pending_payout: 0,
           available_balance: 0,
           total_uploads: 0,
+          total_minutes: 0,
+          payable_minutes: 0,
           payable_uploads: 0,
           rejected_uploads: 0,
           hold_uploads: 0,
@@ -2831,6 +2838,8 @@ app.get('/admin/payout-summary', async (req, res) => {
         paid_total: Number(hunter.paid_total.toFixed(2)),
         pending_payout: Number(hunter.pending_payout.toFixed(2)),
         available_balance: Number(hunter.available_balance.toFixed(2)),
+        total_minutes: Number((hunter.total_minutes || 0).toFixed(2)),
+        payable_minutes: Number((hunter.payable_minutes || 0).toFixed(2)),
       };
     }).sort((a, b) => {
       return String(b.latest_sort_key || '').localeCompare(String(a.latest_sort_key || ''));
@@ -2931,20 +2940,20 @@ app.post('/admin/payout-requests/:request_id/paid', (req, res) => {
 
 app.post('/api/v1/s3-presign', async (req, res) => {
   try {
-   const { prefix, files } = req.body || {};
+    const { prefix, files } = req.body || {};
 
-if (!prefix || !files?.video || !files?.captureMetadata || !files?.imuMetadata) {
-  return res.status(400).json({
-    success: false,
-    message: 'prefix and files.video/captureMetadata/imuMetadata are required',
-  });
-}
+    if (!prefix || !files?.video || !files?.captureMetadata || !files?.imuMetadata) {
+      return res.status(400).json({
+        success: false,
+        message: 'prefix and files.video/captureMetadata/imuMetadata are required',
+      });
+    }
 
-const safePrefix = prefix.startsWith('real/') ? prefix : `real/${prefix}`;
+    const safePrefix = prefix.startsWith('real/') ? prefix : `real/${prefix}`;
 
-const videoKey = `${safePrefix}${files.video}`;
-const captureMetadataKey = `${safePrefix}${files.captureMetadata}`;
-const imuMetadataKey = `${safePrefix}${files.imuMetadata}`;
+    const videoKey = `${safePrefix}${files.video}`;
+    const captureMetadataKey = `${safePrefix}${files.captureMetadata}`;
+    const imuMetadataKey = `${safePrefix}${files.imuMetadata}`;
 
     const videoCommand = new PutObjectCommand({
       Bucket: BUCKET,
@@ -2985,8 +2994,8 @@ const imuMetadataKey = `${safePrefix}${files.imuMetadata}`;
     );
 
     console.log('S3_PRESIGN_CREATED', {
-    prefix,
-   });
+      prefix,
+    });
 
     return res.json({
       success: true,
@@ -3339,14 +3348,14 @@ app.post('/api/v1/upload-complete', async (req, res) => {
     const durationMs = durationMinutes * 60 * 1000;
 
     if (!durationMs || durationMs < MIN_DURATION_MS) {
-  return res.status(400).json({
-    success: false,
-    error: 'UNDER_MIN_DURATION',
-    message: 'Video duration must be at least 30 seconds before completion',
-    duration_minutes: Number(durationMinutes.toFixed(2)),
-    minimum_duration_minutes: 0.5,
-  });
-}
+      return res.status(400).json({
+        success: false,
+        error: 'UNDER_MIN_DURATION',
+        message: 'Video duration must be at least 30 seconds before completion',
+        duration_minutes: Number(durationMinutes.toFixed(2)),
+        minimum_duration_minutes: 0.5,
+      });
+    }
 
     const review = getAutoReview(metadata, {
       uploadComplete: true,
