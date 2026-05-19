@@ -1411,6 +1411,17 @@ app.get('/admin/review', (req, res) => {
       background: #eef2ff;
     }
 
+    .sortBtn {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  margin-left: 3px;
+  padding: 0;
+}
+
     .tableWrap {
       background: #fff;
       border: 1px solid #e5e7eb;
@@ -1638,20 +1649,6 @@ app.get('/admin/review', (req, res) => {
   <button onclick="load('REJECT')">REJECT</button>
   <button onclick="load('HOLD')">HOLD</button>
 
-<input
-  id="quickFilter"
-  placeholder="Hunter / Nickname / Referrer search"
-  oninput="applyQuickFilter()"
-  style="
-    margin-left:12px;
-    padding:7px 10px;
-    border:1px solid #d1d5db;
-    border-radius:8px;
-    min-width:260px;
-    font-weight:700;
-  "
-/>
-
   <button
     onclick="location.href='/admin/payouts'"
     style="
@@ -1669,21 +1666,21 @@ app.get('/admin/review', (req, res) => {
     <table>
       <thead>
         <tr>
-          <th class="col-no">No</th>
-          <th class="col-uploaded">Uploaded At</th>
-          <th class="col-hunter">Hunter</th>
-          <th class="col-nickname">Nickname</th>
-          <th class="col-referrer">Referrer</th>
-          <th class="col-phone">Phone</th>
-          <th class="col-country">Country</th>
-          <th class="col-city">City</th>
-          <th class="col-duration">Min</th>
-          <th class="col-status">Status</th>
-          <th class="col-usd">USD</th>
-          <th class="col-reject">Reject</th>
-          <th class="col-warning">Warning</th>
-          <th class="col-preview">Preview / Parts</th>
-        </tr>
+  <th class="col-no">No</th>
+  <th class="col-uploaded">Uploaded <button class="sortBtn" onclick="sortRows('uploaded','text')">▼</button></th>
+  <th class="col-hunter">Hunter <button class="sortBtn" onclick="sortRows('hunter','text')">▼</button></th>
+  <th class="col-nickname">Nickname <button class="sortBtn" onclick="sortRows('nickname','text')">▼</button></th>
+  <th class="col-referrer">Referrer <button class="sortBtn" onclick="sortRows('referrer','text')">▼</button></th>
+  <th class="col-phone">Phone <button class="sortBtn" onclick="sortRows('phone','text')">▼</button></th>
+  <th class="col-country">Country <button class="sortBtn" onclick="sortRows('country','text')">▼</button></th>
+  <th class="col-city">City <button class="sortBtn" onclick="sortRows('city','text')">▼</button></th>
+  <th class="col-duration">Min <button class="sortBtn" onclick="sortRows('duration','number')">▼</button></th>
+  <th class="col-status">Status <button class="sortBtn" onclick="sortRows('status','text')">▼</button></th>
+  <th class="col-usd">USD <button class="sortBtn" onclick="sortRows('usd','number')">▼</button></th>
+  <th class="col-reject">Reject</th>
+  <th class="col-warning">Warning</th>
+  <th class="col-preview">Preview / Parts</th>
+</tr>
       </thead>
       <tbody id="rows"></tbody>
     </table>
@@ -1718,6 +1715,45 @@ function getStatusClass(status) {
   if (status === 'REJECT') return 'statusReject';
   if (status === 'HOLD') return 'statusHold';
   return 'statusApprove';
+}
+
+let currentSortKey = '';
+let currentSortDir = 1;
+
+function sortRows(key, type) {
+  const rowsEl = document.getElementById('rows');
+
+  document.querySelectorAll('.partsRow').forEach(function(row) {
+    row.remove();
+  });
+
+  const rows = Array.from(rowsEl.querySelectorAll('tr')).filter(function(row) {
+    return !row.classList.contains('partsRow');
+  });
+
+  if (currentSortKey === key) {
+    currentSortDir = currentSortDir * -1;
+  } else {
+    currentSortKey = key;
+    currentSortDir = 1;
+  }
+
+  rows.sort(function(a, b) {
+    let av = a.dataset[key] || '';
+    let bv = b.dataset[key] || '';
+
+    if (type === 'number') {
+      av = Number(av || 0);
+      bv = Number(bv || 0);
+      return (av - bv) * currentSortDir;
+    }
+
+    return String(av).localeCompare(String(bv)) * currentSortDir;
+  });
+
+  rows.forEach(function(row) {
+    rowsEl.appendChild(row);
+  });
 }
 
 async function load(status) {
@@ -1781,6 +1817,17 @@ summary.innerHTML =
    const videoId = 'preview_' + index;
    const partsId = 'parts_' + index;
 
+   tr.dataset.uploaded = uploadedAt;
+   tr.dataset.hunter = hunterId;
+   tr.dataset.nickname = nickname;
+   tr.dataset.referrer = referrer;
+   tr.dataset.phone = phone;
+   tr.dataset.country = country;
+   tr.dataset.city = city;
+   tr.dataset.duration = duration;
+   tr.dataset.status = statusText;
+   tr.dataset.usd = usd;
+
     tr.innerHTML =
       '<td class="col-no">' + no + '</td>' +
       '<td class="col-uploaded" title="' + uploadedAt + '">' + uploadedAt + '</td>' +
@@ -1815,7 +1862,6 @@ tr.querySelector('.partsBtn').onclick = function() {
 };
 
 rows.appendChild(tr);
-applyQuickFilter();
   });
 }
 
