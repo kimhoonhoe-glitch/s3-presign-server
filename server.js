@@ -851,31 +851,55 @@ app.get('/admin/payouts', (req, res) => {
     }
 
     table {
-      width: 100%;
-      min-width: 1000px;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
 
-    th {
-      position: sticky;
-      top: 0;
-      background: #111827;
-      color: white;
-      padding: 10px 8px;
-      text-align: left;
-      font-size: 12px;
-      white-space: nowrap;
-    }
+th {
+  position: sticky;
+  top: 0;
+  background: #111827;
+  color: white;
+  padding: 10px 8px;
+  text-align: center;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 2;
+}
 
-    td {
-      border-bottom: 1px solid #e5e7eb;
-      padding: 9px 8px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      background: white;
-    }
+td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 8px 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: white;
+  text-align: left;
+}
+
+.col-amount {
+  width: 100px;
+  text-align: right;
+}
+
+.resizable {
+  position: relative;
+}
+
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.resizeHandle:hover {
+  background: rgba(255,255,255,0.25);
+}
 
     tr:hover td {
       background: #f9fafb;
@@ -1025,18 +1049,18 @@ app.get('/admin/payouts', (req, res) => {
     <table>
    <thead>
   <tr>
-  <th>No</th>
-  <th>Hunter ID</th>
-  <th>Nickname</th>
-  <th>Referrer</th>
-  <th>Phone</th>
-  <th>Country</th>
-  <th>Total Min</th>
-  <th>Payable Min</th>
-  <th>Uploads</th>
-  <th>Reject</th>
-  <th>Total</th>
-  <th>Available</th>
+ <th class="col-no">No</th>
+ <th class="col-hunter resizable">Hunter ID<span class="resizeHandle"></span></th>
+ <th class="col-hunter resizable">Nickname<span class="resizeHandle"></span></th>
+ <th class="col-hunter resizable">Referrer<span class="resizeHandle"></span></th>
+ <th class="col-phone resizable">Phone<span class="resizeHandle"></span></th>
+ <th class="col-status">Country</th>
+ <th class="col-amount">Total Min</th>
+ <th class="col-amount">Payable Min</th>
+ <th class="col-amount">Uploads</th>
+ <th class="col-amount">Reject</th>
+ <th class="col-amount">Total</th>
+ <th class="col-amount">Available</th>
 </tr>
 </thead>
 <tbody id="rows"></tbody>
@@ -1099,6 +1123,36 @@ function getPayoutButton(request) {
   return '<button class="payPendingBtn" onclick="alert(\\'수동 지급 후 paid 처리 API 연결 예정\\')">지급 예정</button>';
 }
 
+async function loadReviewSessionStats() {
+  const res = await fetch('/admin/review-sessions?limit=1000');
+  const data = await res.json();
+
+  const map = {};
+
+  if (!data.success) return map;
+
+  (data.items || []).forEach(function(session) {
+    const hunterId = session.hunter_id;
+
+    if (!map[hunterId]) {
+      map[hunterId] = {
+        session_uploads: 0,
+        payable_minutes: 0,
+        rejected_sessions: 0
+      };
+    }
+
+    map[hunterId].session_uploads += 1;
+    map[hunterId].payable_minutes += Number(session.payable_duration_minutes || 0);
+
+    if (session.status === 'REJECT') {
+      map[hunterId].rejected_sessions += 1;
+    }
+  });
+
+  return map;
+}
+
 async function loadSummary() {
   try {
     const res = await fetch('/admin/payout-summary');
@@ -1147,6 +1201,7 @@ async function loadHunters() {
 
     const hunters = data.hunters || [];
     const requests = data.payout_requests || [];
+    const sessionStats = await loadReviewSessionStats();
 
     if (!hunters.length) {
       rows.innerHTML = '<tr><td colspan="10">No hunters</td></tr>';
@@ -1191,15 +1246,15 @@ async function loadHunters() {
         '</td>' +
 
         '<td class="col-amount">' +
-          Number(hunter.payable_minutes || 0).toFixed(2) +
+          Number((sessionStats[hunter.hunter_id]?.payable_minutes) || 0).toFixed(2) +
         '</td>' +
 
         '<td class="col-amount">' +
-          Number(hunter.total_uploads || 0) +
-        '</td>' +
+          Number((sessionStats[hunter.hunter_id]?.session_uploads) || 0) +
+         '</td>' +
 
         '<td class="col-amount">' +
-          Number(hunter.rejected_uploads || 0) +
+          Number((sessionStats[hunter.hunter_id]?.rejected_sessions) || 0) +
         '</td>' +
 
         '<td class="col-amount">' +
@@ -1317,6 +1372,46 @@ function closeHunterPopup() {
   document.getElementById('popupBg').style.display = 'none';
 }
 
+function initColumnResize() {
+  document.querySelectorAll('th.resizable').forEach(function(th) {
+    const handle = th.querySelector('.resizeHandle');
+    if (!handle || handle.dataset.ready === '1') return;
+
+    handle.dataset.ready = '1';
+
+    handle.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+
+      const startX = e.pageX;
+      const startWidth = th.offsetWidth;
+      const table = th.closest('table');
+      const colIndex = Array.from(th.parentElement.children).indexOf(th);
+
+      function move(ev) {
+        const newWidth = Math.max(60, startWidth + ev.pageX - startX);
+
+        Array.from(table.querySelectorAll('tr')).forEach(function(row) {
+          const cell = row.children[colIndex];
+          if (cell) {
+            cell.style.width = newWidth + 'px';
+            cell.style.minWidth = newWidth + 'px';
+            cell.style.maxWidth = newWidth + 'px';
+          }
+        });
+      }
+
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  });
+}
+
+initColumnResize();
 loadSummary();
 loadHunters();
 </script>
@@ -1736,6 +1831,8 @@ td {
   </button>
 </div>
 
+<div id="dailySummary" class="dailySummary"></div>
+
   <div class="tableWrap">
     <table>
       <thead>
@@ -1893,6 +1990,8 @@ function applyColumnFilters() {
 
     row.style.display = visible ? '' : 'none';
   });
+
+  updateDailySummary();
 }
 
 async function load(status) {
@@ -1957,6 +2056,7 @@ summary.innerHTML =
    const partsId = 'parts_' + index;
 
    tr.dataset.uploaded = uploadedAt;
+   tr.dataset.date = uploadedAt ? uploadedAt.slice(0, 10) : 'unknown';
    tr.dataset.hunter = hunterId;
    tr.dataset.nickname = nickname;
    tr.dataset.referrer = referrer;
@@ -2004,6 +2104,100 @@ rows.appendChild(tr);
   });
 
   applyColumnFilters();
+}
+
+function updateDailySummary() {
+  const box = document.getElementById('dailySummary');
+  const rows = Array.from(document.querySelectorAll('#rows tr')).filter(function(row) {
+    return !row.classList.contains('partsRow') && row.style.display !== 'none';
+  });
+
+  const map = {};
+
+  rows.forEach(function(row) {
+    const date = row.dataset.date || 'unknown';
+
+    if (!map[date]) {
+      map[date] = {
+        count: 0,
+        minutes: 0,
+        usd: 0,
+        statuses: {}
+      };
+    }
+
+    const status = row.dataset.status || '-';
+
+    map[date].count += 1;
+    map[date].minutes += Number(row.dataset.duration || 0);
+    map[date].usd += Number(row.dataset.usd || 0);
+    map[date].statuses[status] = (map[date].statuses[status] || 0) + 1;
+  });
+
+  const dates = Object.keys(map).sort().reverse();
+
+  if (!dates.length) {
+    box.innerHTML = '';
+    return;
+  }
+
+  box.innerHTML = dates.map(function(date) {
+    const item = map[date];
+    const hours = item.minutes / 60;
+    const statusText = Object.keys(item.statuses).map(function(status) {
+      return status + ': ' + item.statuses[status];
+    }).join('<br>');
+
+    return (
+      '<div class="dailyCard">' +
+        '<b>' + date + '</b>' +
+        '업로드/세션: ' + item.count + '개<br>' +
+        '업로드 시간: ' + item.minutes.toFixed(2) + '분 / ' + hours.toFixed(2) + '시간<br>' +
+        '합계 금액: $' + item.usd.toFixed(2) + '<br>' +
+        '<hr style="border:0;border-top:1px solid #e5e7eb;margin:6px 0;">' +
+        statusText +
+      '</div>'
+    );
+  }).join('');
+}
+
+function initColumnResize() {
+  document.querySelectorAll('th.resizable').forEach(function(th, index) {
+    const handle = th.querySelector('.resizeHandle');
+    if (!handle || handle.dataset.ready === '1') return;
+
+    handle.dataset.ready = '1';
+
+    handle.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+
+      const startX = e.pageX;
+      const startWidth = th.offsetWidth;
+      const table = th.closest('table');
+      const colIndex = Array.from(th.parentElement.children).indexOf(th);
+
+      function move(ev) {
+        const newWidth = Math.max(45, startWidth + ev.pageX - startX);
+
+        Array.from(table.querySelectorAll('tr')).forEach(function(row) {
+          const cell = row.children[colIndex];
+          if (cell) {
+            cell.style.width = newWidth + 'px';
+            cell.style.minWidth = newWidth + 'px';
+            cell.style.maxWidth = newWidth + 'px';
+          }
+        });
+      }
+
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+  });
 }
 
 async function previewVideo(videoId, videoKey, row) {
@@ -2093,7 +2287,7 @@ function togglePartsRow(partsId, row, parts) {
   detailRow.id = partsId;
   detailRow.className = 'partsRow';
 
-  let html = '<td colspan="13"><div class="partsBox">';
+  let html = '<td colspan="14"><div class="partsBox">';
   html += '<b>Session Parts</b>';
 
   if (!parts || !parts.length) {
@@ -2125,6 +2319,7 @@ function togglePartsRow(partsId, row, parts) {
   row.insertAdjacentElement('afterend', detailRow);
 }
 
+initColumnResize();
 load('');
 </script>
 
