@@ -1422,6 +1422,41 @@ app.get('/admin/review', (req, res) => {
   padding: 0;
 }
 
+.filterPanel {
+  display: none;
+  position: fixed;
+  z-index: 100;
+  min-width: 180px;
+  max-height: 260px;
+  overflow: auto;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+  padding: 6px;
+  text-align: left;
+}
+
+.filterOption {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: white;
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.filterOption:hover {
+  background: #eef2ff;
+}
+
+.filterClear {
+  font-weight: 900;
+  color: #dc2626;
+}
+
     .tableWrap {
       background: #fff;
       border: 1px solid #e5e7eb;
@@ -1668,14 +1703,13 @@ app.get('/admin/review', (req, res) => {
         <tr>
   <th class="col-no">No</th>
   <th class="col-uploaded">Uploaded <button class="sortBtn" onclick="sortRows('uploaded','text')">▼</button></th>
-  <th class="col-hunter">Hunter <button class="sortBtn" onclick="sortRows('hunter','text')">▼</button></th>
-  <th class="col-nickname">Nickname <button class="sortBtn" onclick="sortRows('nickname','text')">▼</button></th>
-  <th class="col-referrer">Referrer <button class="sortBtn" onclick="sortRows('referrer','text')">▼</button></th>
+  <th class="col-hunter">Hunter <button class="sortBtn" onclick="showColumnFilter('hunter', this)">▼</button></th>
+  <th class="col-nickname">Nickname <button class="sortBtn" onclick="showColumnFilter('nickname', this)">▼</button></th>
   <th class="col-phone">Phone <button class="sortBtn" onclick="sortRows('phone','text')">▼</button></th>
-  <th class="col-country">Country <button class="sortBtn" onclick="sortRows('country','text')">▼</button></th>
+  <th class="col-country">Country <button class="sortBtn" onclick="showColumnFilter('country', this)">▼</button></th>
   <th class="col-city">City <button class="sortBtn" onclick="sortRows('city','text')">▼</button></th>
   <th class="col-duration">Min <button class="sortBtn" onclick="sortRows('duration','number')">▼</button></th>
-  <th class="col-status">Status <button class="sortBtn" onclick="sortRows('status','text')">▼</button></th>
+  <th class="col-status">Status <button class="sortBtn" onclick="showColumnFilter('status', this)">▼</button></th>
   <th class="col-usd">USD <button class="sortBtn" onclick="sortRows('usd','number')">▼</button></th>
   <th class="col-reject">Reject</th>
   <th class="col-warning">Warning</th>
@@ -1684,6 +1718,7 @@ app.get('/admin/review', (req, res) => {
       </thead>
       <tbody id="rows"></tbody>
     </table>
+    <div id="filterPanel" class="filterPanel"></div>
   </div>
 
 <script>
@@ -1753,6 +1788,70 @@ function sortRows(key, type) {
 
   rows.forEach(function(row) {
     rowsEl.appendChild(row);
+  });
+}
+
+const activeFilters = {};
+
+function showColumnFilter(key, btn) {
+  const panel = document.getElementById('filterPanel');
+  const rows = Array.from(document.querySelectorAll('#rows tr')).filter(function(row) {
+    return !row.classList.contains('partsRow');
+  });
+
+  const values = [...new Set(rows.map(function(row) {
+    return row.dataset[key] || '-';
+  }))].sort();
+
+  let html =
+    '<button class="filterOption filterClear" onclick="clearColumnFilter(\\'' + key + '\\')">ALL 보기</button>';
+
+  values.forEach(function(value) {
+    html +=
+      '<button class="filterOption" onclick="setColumnFilter(\\'' + key + '\\', \\'' +
+      String(value).replace(/'/g, "\\\\'") +
+      '\\')">' +
+      value +
+      '</button>';
+  });
+
+  panel.innerHTML = html;
+
+  const rect = btn.getBoundingClientRect();
+  panel.style.left = rect.left + 'px';
+  panel.style.top = (rect.bottom + 4) + 'px';
+  panel.style.display = 'block';
+}
+
+function setColumnFilter(key, value) {
+  activeFilters[key] = value;
+  document.getElementById('filterPanel').style.display = 'none';
+  applyColumnFilters();
+}
+
+function clearColumnFilter(key) {
+  delete activeFilters[key];
+  document.getElementById('filterPanel').style.display = 'none';
+  applyColumnFilters();
+}
+
+function applyColumnFilters() {
+  document.querySelectorAll('.partsRow').forEach(function(row) {
+    row.remove();
+  });
+
+  document.querySelectorAll('#rows tr').forEach(function(row) {
+    if (row.classList.contains('partsRow')) return;
+
+    let visible = true;
+
+    Object.keys(activeFilters).forEach(function(key) {
+      if ((row.dataset[key] || '-') !== activeFilters[key]) {
+        visible = false;
+      }
+    });
+
+    row.style.display = visible ? '' : 'none';
   });
 }
 
@@ -1863,6 +1962,8 @@ tr.querySelector('.partsBtn').onclick = function() {
 
 rows.appendChild(tr);
   });
+
+  applyColumnFilters();
 }
 
 async function previewVideo(videoId, videoKey, row) {
