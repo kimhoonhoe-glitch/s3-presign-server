@@ -1465,26 +1465,25 @@ app.get('/admin/review', (req, res) => {
       box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     }
 
-      table {
-      width: 100%;
-      min-width: 1180px;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }
+     table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
 
-    th {
+  th {
   position: sticky;
   top: 0;
   background: #111827;
   color: #fff;
   padding: 9px 8px;
-  text-align: right;
+  text-align: center;
   font-size: 12px;
   white-space: nowrap;
   z-index: 2;
 }
 
-      td {
+td {
   border-bottom: 1px solid #e5e7eb;
   padding: 5px 4px;
   vertical-align: top;
@@ -1493,7 +1492,7 @@ app.get('/admin/review', (req, res) => {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11px;
-  text-align: right;
+  text-align: left;
 }
 
     tr:hover td {
@@ -1514,18 +1513,18 @@ app.get('/admin/review', (req, res) => {
     .col-city { width: 60px; }
     .col-duration { width: 48px; text-align: right; }
 
-    .col-status {
-      width: 105px;
-      white-space: normal;
-      word-break: break-word;
-      line-height: 1.2;
-      font-size: 11px;
-    }
+.col-status {
+  width: 105px;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.2;
+  font-size: 11px;
+}
 
-    .col-usd { width: 55px; text-align: right; }
-    .col-reject { width: 145px; }
-    .col-warning { width: 145px; }
-    .col-preview { width: 235px; }
+.col-usd { width: 55px; text-align: right; }
+.col-reject { width: 145px; }
+.col-warning { width: 145px; }
+.col-preview { width: 235px; }
 
     .reason {
       white-space: normal;
@@ -1669,6 +1668,47 @@ app.get('/admin/review', (req, res) => {
   margin-bottom: 4px;
   font-size: 11px;
 }
+
+.resizable {
+  position: relative;
+}
+
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.resizeHandle:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+.dailySummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.dailyCard {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  font-size: 12px;
+}
+
+.dailyCard b {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
   </style>
 </head>
 <body>
@@ -1680,10 +1720,9 @@ app.get('/admin/review', (req, res) => {
 
  <div class="filters">
   <button onclick="load('')">ALL</button>
-  <button onclick="load('APPROVE')">APPROVE</button>
+  <button onclick="load('GOOD_PENDING_REVIEW')">GOOD</button>
+  <button onclick="load('PARTIAL_PASS')">PARTIAL</button>
   <button onclick="load('REJECT')">REJECT</button>
-  <button onclick="load('HOLD')">HOLD</button>
-
   <button
     onclick="location.href='/admin/payouts'"
     style="
@@ -1703,9 +1742,10 @@ app.get('/admin/review', (req, res) => {
         <tr>
   <th class="col-no">No</th>
   <th class="col-uploaded">Uploaded <button class="sortBtn" onclick="sortRows('uploaded','text')">▼</button></th>
-  <th class="col-hunter">Hunter <button class="sortBtn" onclick="showColumnFilter('hunter', this)">▼</button></th>
-  <th class="col-nickname">Nickname <button class="sortBtn" onclick="showColumnFilter('nickname', this)">▼</button></th>
-  <th class="col-phone">Phone <button class="sortBtn" onclick="sortRows('phone','text')">▼</button></th>
+  <th class="col-hunter resizable" data-col="hunter">Hunter <button class="sortBtn" onclick="showColumnFilter('hunter', this)">▼</button><span class="resizeHandle"></span></th>
+  <th class="col-nickname resizable" data-col="nickname">Nickname <button class="sortBtn" onclick="showColumnFilter('nickname', this)">▼</button><span class="resizeHandle"></span></th>
+  <th class="col-referrer resizable" data-col="referrer">Referrer <button class="sortBtn" onclick="showColumnFilter('referrer', this)">▼</button><span class="resizeHandle"></span></th>
+  <th class="col-phone resizable" data-col="phone">Phone <button class="sortBtn" onclick="sortRows('phone','text')">▼</button><span class="resizeHandle"></span></th>
   <th class="col-country">Country <button class="sortBtn" onclick="showColumnFilter('country', this)">▼</button></th>
   <th class="col-city">City <button class="sortBtn" onclick="sortRows('city','text')">▼</button></th>
   <th class="col-duration">Min <button class="sortBtn" onclick="sortRows('duration','number')">▼</button></th>
@@ -2053,7 +2093,7 @@ function togglePartsRow(partsId, row, parts) {
   detailRow.id = partsId;
   detailRow.className = 'partsRow';
 
-  let html = '<td colspan="14"><div class="partsBox">';
+  let html = '<td colspan="13"><div class="partsBox">';
   html += '<b>Session Parts</b>';
 
   if (!parts || !parts.length) {
