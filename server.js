@@ -1123,36 +1123,6 @@ function getPayoutButton(request) {
   return '<button class="payPendingBtn" onclick="alert(\\'수동 지급 후 paid 처리 API 연결 예정\\')">지급 예정</button>';
 }
 
-async function loadReviewSessionStats() {
-  const res = await fetch('/admin/review-sessions?limit=1000');
-  const data = await res.json();
-
-  const map = {};
-
-  if (!data.success) return map;
-
-  (data.items || []).forEach(function(session) {
-    const hunterId = session.hunter_id;
-
-    if (!map[hunterId]) {
-      map[hunterId] = {
-        session_uploads: 0,
-        payable_minutes: 0,
-        rejected_sessions: 0
-      };
-    }
-
-    map[hunterId].session_uploads += 1;
-    map[hunterId].payable_minutes += Number(session.payable_duration_minutes || 0);
-
-    if (session.status === 'REJECT') {
-      map[hunterId].rejected_sessions += 1;
-    }
-  });
-
-  return map;
-}
-
 async function loadSummary() {
   try {
     const res = await fetch('/admin/payout-summary');
@@ -1188,23 +1158,22 @@ async function loadHunters() {
   const rows = document.getElementById('rows');
 
   rows.innerHTML =
-    '<tr><td colspan="10" class="muted">Loading...</td></tr>';
+    '<tr><td colspan="12" class="muted">Loading...</td></tr>';
 
   try {
     const res = await fetch('/admin/payout-summary');
     const data = await res.json();
 
     if (!data.success) {
-      rows.innerHTML = '<tr><td colspan="10">Failed to load hunters</td></tr>';
+      rows.innerHTML = '<tr><td colspan="12">Failed to load hunters</td></tr>';
       return;
     }
 
     const hunters = data.hunters || [];
     const requests = data.payout_requests || [];
-    const sessionStats = await loadReviewSessionStats();
 
     if (!hunters.length) {
-      rows.innerHTML = '<tr><td colspan="10">No hunters</td></tr>';
+      rows.innerHTML = '<tr><td colspan="12">No hunters</td></tr>';
       return;
     }
 
@@ -1246,15 +1215,15 @@ async function loadHunters() {
         '</td>' +
 
         '<td class="col-amount">' +
-          Number((sessionStats[hunter.hunter_id]?.payable_minutes) || 0).toFixed(2) +
+          Number(hunter.payable_minutes || 0).toFixed(2) +
         '</td>' +
 
         '<td class="col-amount">' +
-          Number((sessionStats[hunter.hunter_id]?.session_uploads) || 0) +
+          Number(hunter.total_uploads || 0) +
          '</td>' +
 
         '<td class="col-amount">' +
-          Number((sessionStats[hunter.hunter_id]?.rejected_sessions) || 0) +
+          Number(hunter.rejected_uploads || 0) +
         '</td>' +
 
         '<td class="col-amount">' +
@@ -1277,7 +1246,7 @@ async function loadHunters() {
 
   } catch (e) {
     console.error(e);
-    rows.innerHTML = '<tr><td colspan="10">Error loading hunters</td></tr>';
+    rows.innerHTML = '<tr><td colspan="12">Error loading hunters</td></tr>';
   }
 }
 function openHunterPopup(hunter, requests) {
@@ -3190,6 +3159,7 @@ app.get('/admin/payout-summary', async (req, res) => {
     const payoutRequests = readPayoutRequests();
 
     const hunterMap = {};
+    const reviewItems = [];
 
     for (const key of keys) {
       try {
@@ -3309,20 +3279,62 @@ app.get('/admin/payout-summary', async (req, res) => {
         const estimated = calculatePayableEarning(metadata, review);
         const durationMinutes = getDurationMinutes(metadata);
 
-        hunterMap[hunterId].total_uploads += 1;
-        hunterMap[hunterId].total_minutes += durationMinutes;
+        reviewItems.push({
+          s3_key: key,
+          s3_prefix: prefix,
 
-        if (review.status === 'REJECT') {
-          hunterMap[hunterId].rejected_uploads += 1;
-        } else if (review.status === 'HOLD') {
-          hunterMap[hunterId].hold_uploads += 1;
-        } else if (review.payable) {
-          hunterMap[hunterId].payable_uploads += 1;
-          hunterMap[hunterId].payable_minutes += durationMinutes;
-          hunterMap[hunterId].capture_earnings += estimated;
-        }
+          hunter_id: hunterId,
+          hunter: {
+            hunter_id: hunterId,
+            nickname,
+            phone,
+            country,
+            city,
+            recruited_by_hunter_id: recruitedByHunterId,
+          },
+
+          capture_date: extractCaptureDate(metadata, key),
+          sort_time_ms: extractCaptureSortTime(metadata, key),
+          duration_minutes: Number(durationMinutes.toFixed(2)),
+
+          upload_complete: uploadStatus.strictComplete,
+          missing_files: uploadStatus.missing,
+
+          status: review.status,
+          payable: review.payable,
+          reject_reasons: review.reasons,
+          review_warnings: review.warnings,
+          quality_bucket: review.quality_bucket,
+
+          estimated_earning_usd: estimated,
+
+          video_key: uploadStatus.keys.video,
+          capture_metadata_key: uploadStatus.keys.captureMetadata,
+          imu_metadata_key: uploadStatus.keys.imuMetadata,
+        });
       } catch (itemError) {
         console.error('ADMIN_PAYOUT_SUMMARY_ITEM_ERROR:', itemError);
+      }
+    }
+
+    const sessions = groupReviewItemsIntoSessions(reviewItems, 5);
+
+    for (const session of sessions) {
+      const hunterId = session.hunter_id;
+
+      if (!hunterMap[hunterId]) continue;
+
+      hunterMap[hunterId].total_uploads += 1;
+      hunterMap[hunterId].total_minutes += Number(session.total_duration_minutes || 0);
+      hunterMap[hunterId].payable_minutes += Number(session.payable_duration_minutes || 0);
+      hunterMap[hunterId].capture_earnings += Number(session.estimated_earning_usd || 0);
+
+      if (session.status === 'REJECT') {
+        hunterMap[hunterId].rejected_uploads += 1;
+      }
+
+      if (Number(session.payable_duration_minutes || 0) > 0) {
+        hunterMap[hunterId].payable_uploads += 1;
       }
     }
 
